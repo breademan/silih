@@ -383,38 +383,37 @@ UpdateValsMap_WRAM:
   ;Write the values to the WRAM buffer
   ;load address of first WRAM variable into HL-- assuming they're contiguous and in-order, we can just iterate through them without needing to dereference a table or hard-code.
   ;We should probably just hard-code the values, though, so they don't need to be contiguous
-  ld hl, CamOptN_RAM ;+3c3b
+  DEF VALSMAP_OFFSET = 0 ;Holds the pointer of the current location in the buffer
   ld b,UI_ICONS_BASE_ID ;+2c2b ;For now, tiles showing nybble value are indexed from E0. We should fix this for speed.
   ;Initial cycles: 
 
-  ;for first entry (N), there is only 1 nybble, so only change the tile for the least significant nybble        
+  ;for first entry (edge mode), there is only 1 nybble, so only change the tile for the least significant nybble        
   IF SCREEN_FLIP_H==1 ;With horizontal rotation, this is the leftmost (just under the text)
     ;load start of UI in tilemap into DE, plus 1 line so we're in the row for values
-    ld de, OptionLinesBuffer ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
+    ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
   ELSE ;With no rotation, this is the rightmost nybble
     ld de, TILEMAP_UI_ORIGIN_H + $20 + $03 ;+3c3b
   ENDC
-  ld a,[hli] ;+2c1b ;put the value of the selected option in a
+  ld a,[CamOptEdgeMode] ;+2c1b ;put the value of the selected option in a
   ;and a, $0F ;Select the correct nybble 
   or a,b ;+1c1b
   ld [de], a ;+2c1b ;load nybble value into tilemap
 
-  ;Second entry, VH; 1 nybble
-  ld a, $04 ;+2c2b
-  add a, e ;+1c1b
-  ld e, a ;+1c1b ;move de 4 tiles to the right, whether flipped or not
-  ld a, [hli] ;+2c1b
-  or a,b ;+1c1b
-  ld [de], a ;+2c1b
+  ;Second entry, (blank); 1 nybble
+  DEF VALSMAP_OFFSET += 4
+  ;ld de, OptionLinesBuffer+VALSMAP_OFFSET;move de 4 tiles to the right, whether flipped or not
+  ;ld a, [CamOptVH_RAM] ;+2c1b
+  ;or a,b ;+1c1b
+  ;ld [de], a ;+2c1b
 
   ;Third entry, C; 4 nybbles from 2 bytes
-  ;We can either load starting from the MSB or from LSB. Since the value is held in big-endian, lowest/'first' byte is MSB.
-  ;Here, HL is pointing to the MSB 
+  ;OLD: We can either load starting from the MSB or from LSB. Since the value is held in big-endian, lowest/'first' byte is MSB.
+  ;OLD: Here, HL is pointing to the MSB
   IF SCREEN_FLIP_H==1
+    ld hl, CamOptC_RAM
     ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
-    ld a, $04+$01 ;+2c2b ; go to rightmost tile of left byte (MSB's MSN)
-    add a,e ;+1c1b
-    ld e,a ;+1c1b
+    DEF VALSMAP_OFFSET += 5
+    ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+2c2b ; go to rightmost tile of left byte (MSB's MSN)
     call UpdateByteInTilemap ;3b
     inc e ;display LSB:H
     inc e 
@@ -427,9 +426,9 @@ UpdateValsMap_WRAM:
   ;Fourth entry, O; 2 nybbles
   IF SCREEN_FLIP_H==1 
   ;if screen flipped, de is second-to-right and we want to move it to the one-after-leftmost
-  ld a,$02+$01 ;+2c2b
-  add a, e ;+1c1b
-  ld e,a ;+1c1b
+  ld hl, CamOptO_RAM
+  DEF VALSMAP_OFFSET += 4
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
   call UpdateByteInTilemap
   ELSE
   ;if not flipped, de is on rightmost side and we want to move it to the rightmost of next (if filling from low nybble) or one-before-rightmost (if filling from high)
@@ -438,9 +437,9 @@ UpdateValsMap_WRAM:
   ;Fifth Entry, G; 2 nybbles
   ;here, if flipped, de will be on the leftmost side, and we want to move it to one-after-leftmost
   IF SCREEN_FLIP_H==1 
-  ld a,$04+$01 ;+2c2b
-  add a, e ;+1c1b
-  ld e,a ;+1c1b
+  ld hl,CamOptG_RAM
+  DEF VALSMAP_OFFSET+=4
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
   call UpdateByteInTilemap
   ELSE
   ;if not flipped, de is on rightmost side and we want to move it to the rightmost of next (if filling from low nybble) or one-before-rightmost (if filling from high)
@@ -448,24 +447,22 @@ UpdateValsMap_WRAM:
 
   ;Second line 1st Entry, E; 1 nybble
   IF SCREEN_FLIP_H==1
-  ld a,$10 ;move it one half-line to make it wrap around 
-  add a, e
-  ld e,a
+  DEF VALSMAP_OFFSET+=$F
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
 
-  ld a, [hli] ;+2c1b
+  ld a, [CamOptE_RAM] ;+2c1b
   or a,b ;+1c1b
   ld [de], a ;+2c1b
   ELSE
   ENDC
 
 
-  ;Second line 2nd Entry, N
+  ;Second line 2nd Entry, V
   IF SCREEN_FLIP_H==1
-  ld a, $4 
-  add a, e
-  ld e,a
+  DEF VALSMAP_OFFSET+=4
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
 
-  ld a, [hli] ;+2c1b
+  ld a, [CamOptV_RAM] ;+2c1b
   or a,b ;+1c1b
   ld [de], a ;+2c1b
   ELSE
@@ -473,11 +470,10 @@ UpdateValsMap_WRAM:
 
   ;Second Line 3rd Entry, Contrast
   IF SCREEN_FLIP_H==1
-  ld a, $4 
-  add a, e
-  ld e,a
+  DEF VALSMAP_OFFSET+=4
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
 
-  ld a, [hli] ;+2c1b
+  ld a, [CamOptContrast] ;+2c1b
   or a,b ;+1c1b
   ld [de], a ;+2c1b
   ELSE
@@ -485,11 +481,10 @@ UpdateValsMap_WRAM:
 
   ;Second Line 4th Entry, Dither Table
   IF SCREEN_FLIP_H==1
-  ld a, $4 
-  add a, e
-  ld e,a
+  DEF VALSMAP_OFFSET+=4
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
 
-  ld a, [hli] ;+2c1b
+  ld a, [CamOptDitherTable] ;+4c3b
   or a,b ;+1c1b
   ld [de], a ;+2c1b
   ELSE
@@ -500,7 +495,7 @@ UpdateValsMap_WRAM:
 
 ;hl: location of byte to put into tilemap
 ;de location in tilemap to load the data
-;b tile index offset in tiledata for the tiles you want to display (initially $E0) 
+;b tile index offset in tiledata for the tiles you want to display (UI_ICONS_BASE_ID)
 ;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
 ;assumes de doesn't cross a byte address boundary
 UpdateByteInTilemap:
@@ -879,11 +874,19 @@ SelectedMinTable:
 db $00, $00, $00, $20, $00
 db $00, $00, $00, $00, $00
 SelectedMaxTable:
-db $01, $03, $FF, $3F, $1F
+db $03, $03, $FF, $3F, $1F
 db $07, $07, $0F, $02, $01;E (first entry of 2nd row) is technically 4 bits, but setting E3 does edge extraction, we'd have to set Z to 0 for that, and I can't imagine anyone would use it.
 SelectedAddrTable: ;holds the addresses of the WRAM variables for each camera register
-dw CamOptN_RAM, CamOptVH_RAM, CamOptC_RAM, CamOptO_RAM, CamOptG_RAM
+dw CamOptEdgeMode, CamOptVH_RAM, CamOptC_RAM, CamOptO_RAM, CamOptG_RAM
 dw CamOptE_RAM, CamOptV_RAM, CamOptContrast, CamOptDitherTable, CamOptDitherPattern
+
+;Must not crrss byte-address boundary
+EdgeControlModes:
+  ;An entry is stored as 00000:VH1:VH0:N.
+  db %00000000, \; Positive image N VH = 0 00
+  %00000010, \; Horizontal Enhancement N VH = 0 01
+  %00000101, \; Vertical Enhancement N VH = 1 10
+  %00000111  ; 2D Enhancement N VH = 1 11
 
 ;Bayer matrix that maps threshold values to a dither pattern: 16 bytes
 ; OrderTable: db  15, 7, 13, 5, \
@@ -913,9 +916,10 @@ OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are a
 ;A line buffer size of 64 means two lines of data. We may want to split this into two labels so we can work with the lines separately, but we may also just be able to work with it contiguously.
 ;OptionLinesBuffer is HDMA'd, meaning it must be aligned on 16bytes
 
-;Must be placed in the order they appear in the UI
+;Previously had to be placed in UI order for UpdateValsMap_WRAM, but it no longer cares.
+;PrepareCameraOpts doesn't care about their in-memory order, so it should be safe to move them around otherwise.
 ;8 bytes
-CamOptN_RAM: db
+CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptVH_RAM: db
   CamOptC_RAM: ;CamOptC_RAM is stored in little-endian order, inconsistent with the CAM registers, but easily updated by modify_nybble
     CamOptC_RAM_L: db 
@@ -954,6 +958,9 @@ CamOptN_RAM: db
   ;Save Slot variables: 2 bytes
   SAVE_SLOTS_FREE: db
   SAVE_SLOTS_USED: db
+
+  ;Meta-option: 1byte
+  CamOptEdgeMode: db
   
 ;1 byte
 ContrastChangedFlag: db ;When contrast is changed, set this to 1
@@ -962,8 +969,8 @@ ContrastChangedFlag: db ;When contrast is changed, set this to 1
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
 
-  ;Cumulative $9F bytes
-  ;$61 bytes remaining
+  ;Cumulative $A0 bytes
+  ;$60 bytes remaining
   
 SECTION "OAM Work Area SECTION", WRAM0[$CE00]
   ;OAM_Work_Area_Storage:

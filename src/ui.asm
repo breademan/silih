@@ -6,7 +6,7 @@ UIJumpTable: ;12 bytes
 dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm
 ChangeOptionHandler_table:
   ;determines what happens when you press up/down to modify a value during MENU_SELECTED menustate
-dw  ModifyCamOptN_UI, ModifyCamOptVH_UI, ModifyCamOptC_UI, ModifyCamOptO_UI, ModifyCamOptG_UI, \
+dw  ModifyEdgeMode_UI, ModifyCamOptVH_UI, ModifyCamOptC_UI, ModifyCamOptO_UI, ModifyCamOptG_UI, \
     ModifyCamOptE_UI, ModifyCamOptV_UI, ModifyContrast_UI, ModifyDitherTable_UI, ModifyDitherPattern_UI
     ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
     .end
@@ -536,6 +536,12 @@ ModifyDitherPattern_UI:
   pop hl
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
+ModifyEdgeMode_UI:
+  pop hl
+  call ModifyNybble
+  ;Modify working N/VH registers based off the value in EdgeControlModes[CamOptEdgeMode]
+  call SetNVHtoEdgeMode
+  jp MenuHandler_Selected.modifyValueTail
   
 
 
@@ -661,7 +667,27 @@ GenerateThumbnail:
 
   ret
 
+;Modify working N/VH registers based off the value in EdgeControlModes[CamOptEdgeMode]
+;@param: hl: address of CamOptEdgeMode
+;@clobber: b, hl, a
+SetNVHtoEdgeMode:
+  ld a, [hl] ;a = CamOptEdgeMode
+  ld hl, EdgeControlModes
+  add a, l
+  ld l,a
+  ld a, [hl] ;a = EdgeControlModes[CamOptEdgeMode]
+  ld b, a
+  srl b ; b = VH
+  and a, $01 ; a = N
 
+  ;Load N VH (regs a b) into CamOpt variables so they can be used in the next capture
+  /*ld [CamOptN_RAM], a 4c3b     
+  ld a, b 1c1b                 
+  ld [CamOptVH_RAM], a 4c3b   */     
+  ld hl, CamOptN_RAM;3c3b
+  ld [hli], a ;2c1b ;load a into N working reg
+  ld [hl],b ;2c1b  ;load b into VH working reg <- HL method uses hl to save 2c2b, requires N/VH work registers be contiguous
+  ret
 
 
 ENDL

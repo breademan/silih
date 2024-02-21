@@ -19,7 +19,7 @@ Currently, it is missing several important features. Also, all the graphics are 
 - DMG support. This includes the original Game Boy / Pocket / Light / Super Game Boy 1 and 2. The DMG does not have enough RAM to store the entire payload, and we use CGB-exclusive features like DMA transfers and rotation. Though conceivably possible (and definitely possible for the SGB!), no support for these platforms are planned.
 
 ## Quickstart
-Download the latest release from our [releases page](), flash it onto a flash cart, and run it on your Game Boy Color/Advance. 
+Download the latest release from our [releases page](https://github.com/breademan/silih/releases/latest), flash it onto a flash cart, and run it on your Game Boy Color/Advance. 
 When you see the screen that says "Press A to play," carefully remove the flash cart and insert your Game Boy Camera cart and press any button. 
 If for some reason you want to run it in an emulator, some emulators do support both the Game Boy Camera AND yanking Game Paks while the game is running, such as BGB and Sameboy.
 
@@ -29,9 +29,8 @@ If for some reason you want to run it in an emulator, some emulators do support 
 
 ## Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.
-- __N:__ Exclusively set vertical edge enhancement mode. ?
-- __VH__: Select vertical/horizontal edge operation mode. ?
-- __C__: Exposure Time (in steps of 16μS). Determines how long the sensor collects light before being read out. Exposure time is usually determined by
+- __M__: Selects the edge enhancement mode (0: None, 1: Horizontal, 2: Vertical, or 3: 2D) using camera registers N and VH.
+- __C__: Exposure Time (in steps of 16μS). Determines how long the sensor collects light before being read out.
 - __O__: Output reference voltage. This is essentially the same as V, but changes the output voltage bias by smaller steps. In practice, increasing this value leads to all pixels looking 'brighter' to the MAC-GBD chip.
 - __G__: Gain. Higher values need less light but produce a noiser image. Lower values need more light but produce a cleaner image.
 - __E__: Edge Enhancement ratio. The higher it is, the more filtering will be done to make edges stand out in the image.

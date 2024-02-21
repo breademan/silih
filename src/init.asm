@@ -203,7 +203,7 @@ BuildHorizontalHeader: ;Fills the UI with the icons for each setting
 ;Tile IDs are UI_ICONS_BASE_ID + index in the source image
 UI_ICONS_ARRANGEMENT:
   DEF UI_ICONS_BASE_ID EQU $60
-  db $13+UI_ICONS_BASE_ID,$10+UI_ICONS_BASE_ID,$0C+UI_ICONS_BASE_ID,$00+UI_ICONS_BASE_ID,$12+UI_ICONS_BASE_ID ; N VH C O(0) G
+  db $10+UI_ICONS_BASE_ID,$13+UI_ICONS_BASE_ID,$0C+UI_ICONS_BASE_ID,$00+UI_ICONS_BASE_ID,$12+UI_ICONS_BASE_ID ; N VH C O(0) G
   db $0E+UI_ICONS_BASE_ID,$11+UI_ICONS_BASE_ID,$15+UI_ICONS_BASE_ID,$16+UI_ICONS_BASE_ID,$1F+UI_ICONS_BASE_ID ; E(was brightness) / Contr / Pattern / V (was autoexposure)/ Blank
 
 BuildUITilemapV:
