@@ -4,11 +4,15 @@ UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
 UIJumpTable: ;12 bytes
 dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm
-ChangeOptionHandler_table:
+
   ;determines what happens when you press up/down to modify a value during MENU_SELECTED menustate
-dw  ModifyEdgeMode_UI, ModifyCamOptVH_UI, ModifyCamOptC_UI, ModifyCamOptO_UI, ModifyCamOptG_UI, \
-    ModifyCamOptE_UI, ModifyCamOptV_UI, ModifyContrast_UI, ModifyDitherTable_UI, ModifyDitherPattern_UI
-    ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
+ChangeOptionHandler_table:
+  MACRO X
+  dw \6
+  ENDM
+  INCLUDE "src/ui_elements.inc"
+  
+  ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
     .end
 
 
