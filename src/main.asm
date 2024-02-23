@@ -808,12 +808,15 @@ PrepareDitherPattern:
 ;-------------------------------------------------------------------------------------------------------------------------
 ;These functions set OptionLinesBuffer to tiles corresponding to the underlying values
 
+DEF DEFINE_NULL_X EQUS "MACRO X\n \n ENDM\n"
+
 ;Sets VALSMAP_OFFSET to (the offset of the left tile of) the area it should be drawn in OptionLinesBuffer
 MACRO GET_UI_OFFSET
   DEF VALSMAP_OFFSET = 0
-  DEF FOUND = 0
   DEF XMACRO_SEARCH_TERM EQUS \1
-  DEF GETINDEX_X_DEF EQUS "MACRO X\nIF \\1=={XMACRO_SEARCH_TERM}\n  DEF FOUND = 1\n   ELIF FOUND==0\n      DEF VALSMAP_OFFSET+=1\n    ELSE\n    \n    ENDC\n  ENDM\n"
+  ;This macro only works if the numerical values underlying the labels are unique. -- otherwise we'd need to compare the names of the labels instead of their values.
+  DEF GETINDEX_X_DEF EQUS "MACRO X\nIF \\1=={XMACRO_SEARCH_TERM}\n PURGE X\n \{DEFINE_NULL_X\}\n         ELSE\n DEF VALSMAP_OFFSET+=1  \nENDC\n  ENDM\n"
+  ;X counts every element that is not the search term, then redefines itself to be a null macro after
   GETINDEX_X_DEF
   INCLUDE "src/ui_elements.inc"
   PURGE XMACRO_SEARCH_TERM
@@ -828,21 +831,66 @@ ENDM
 ;@param: none
 ;@clobber: a, de
 UpdateOptionBuffer_EdgeMode:
-;  DEF XMACRO_SEARCH_TERM EQUS "CamOptEdgeMode" ;problem, isn't this can't be redefined, can it?
-;  GET_UI_OFFSET
   GET_UI_OFFSET "CamOptEdgeMode"
 
   IF SCREEN_FLIP_H==1 ;With horizontal rotation, this is the leftmost (just under the text)
-    ;load start of UI in tilemap into DE, plus 1 line so we're in the row for values
     ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
   ELSE ;With no rotation, this is the rightmost nybble
     ld de, TILEMAP_UI_ORIGIN_H + $20 + $03 ;+3c3b
   ENDC
   ld a,[CamOptEdgeMode] ;+2c1b ;put the value of the selected option in a 
-  or a,UI_ICONS_BASE_ID ;+1c1b
+  or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b ;load nybble value into tilemap
   ret
 
+UpdateOptionBuffer_CamOptE:
+  GET_UI_OFFSET "CamOptE_RAM"
+  IF SCREEN_FLIP_H==1
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+
+  ld a, [CamOptE_RAM] ;+4c3b
+  or a,UI_ICONS_BASE_ID
+  ld [de], a ;+2c1b
+  ELSE
+  ENDC
+  ret
+
+UpdateOptionBuffer_CamOptContrast:
+  GET_UI_OFFSET "CamOptContrast"
+  IF SCREEN_FLIP_H==1
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+
+  ld a, [CamOptContrast] ;+4c3b
+  or a,UI_ICONS_BASE_ID
+  ld [de], a ;+2c1b
+  ELSE
+  ENDC
+  ret
+
+UpdateOptionBuffer_DitherTable:
+  GET_UI_OFFSET "CamOptDitherTable"
+
+  IF SCREEN_FLIP_H==1
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+
+  ld a, [CamOptDitherTable] ;+4c3b
+  or a,UI_ICONS_BASE_ID
+  ld [de], a ;+2c1b
+  ELSE
+  ENDC
+  ret
+
+UpdateOptionBuffer_CamOptV:
+  GET_UI_OFFSET "CamOptV_RAM"
+  IF SCREEN_FLIP_H==1
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+
+  ld a, [CamOptV_RAM] ;+4c3b
+  or a,UI_ICONS_BASE_ID
+  ld [de], a ;+2c1b
+  ELSE
+  ENDC
+  ret
 
 UpdateOptionBuffer_CamOptC: 
   GET_UI_OFFSET "CamOptC_RAM"
@@ -896,54 +944,6 @@ UpdateOptionBuffer_CamOptG:
   ENDC  
   ret
 
-UpdateOptionBuffer_CamOptE:
-  GET_UI_OFFSET "CamOptE_RAM"
-  IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
-  ld a, [CamOptE_RAM] ;+2c1b
-  or a,UI_ICONS_BASE_ID
-  ld [de], a ;+2c1b
-  ELSE
-  ENDC
-  ret
-
-UpdateOptionBuffer_CamOptContrast:
-  GET_UI_OFFSET "CamOptContrast"
-  IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
-  ld a, [CamOptContrast] ;+2c1b
-  or a,UI_ICONS_BASE_ID
-  ld [de], a ;+2c1b
-  ELSE
-  ENDC
-  ret
-
-UpdateOptionBuffer_DitherTable:
-  GET_UI_OFFSET "CamOptDitherTable"
-
-  IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
-  ld a, [CamOptDitherTable] ;+4c3b
-  or a,UI_ICONS_BASE_ID
-  ld [de], a ;+2c1b
-  ELSE
-  ENDC
-  ret
-
-UpdateOptionBuffer_CamOptV:
-  GET_UI_OFFSET "CamOptV_RAM"
-  IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
-  ld a, [CamOptV_RAM] ;+2c1b
-  or a,UI_ICONS_BASE_ID
-  ld [de], a ;+2c1b
-  ELSE
-  ENDC
-  ret
 ;----------------------------------------------------------------------------------------------------------
 
 
