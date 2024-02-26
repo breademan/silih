@@ -58,7 +58,7 @@ launch:
 
     ld  hl,$8000 ; start of VRAM
     ld  de,vram_data ; source of VRAM code
-.copy_code_to_vram ; copies the data in $0000 to $0FFF to $8000-8FFF (VRAM)
+.copy_code_to_vram ; copies the data in $0000 to $0FFF to $8000-87FF (VRAM)
     ld  a,[de]
     inc de
     ld  [hl+],a
@@ -66,7 +66,7 @@ launch:
     jr z, .copy_code_to_vram
 
     ld  de,GraphicsData ; source of VRAM code
-.copy_graphics_to_vram ; copies the data in $0000 to $0FFF to $8000-8FFF (VRAM)
+.copy_graphics_to_vram ; copies the data in $0000 to $0FFF to $8800-8FFF (VRAM)
     ld  a,[de]
     inc de
     ld  [hl+],a

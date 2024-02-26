@@ -115,7 +115,7 @@ ViewfinderChecks:
     jp nz, ViewfinderMain
     ;Jump to relevant state handler
     ldh a, [viewfinder_state]
-    sla a
+    add a,a
     ld c, a
     ld b, 0
     ld hl, Viewfinder_jp_table
@@ -768,8 +768,8 @@ PrepareDitherPattern:
 
 
   ld a, [CamOptContrast] ;+4
-  sla a ;+2
-  sla a ;multiply contrast value by 4 ;+2
+  add a,a ;+1
+  add a,a ;multiply contrast value by 4 ;+1
   add a, l ;+1
   ld l, a ; hl = dither base table + (4*contrast). ;+1
  

@@ -130,7 +130,7 @@ MenuHandler_Selected:
     ld hl, SelectedAddrTable ;3c 3b
     ldh a, [MENU_POSITION] ;3c 2b
     and a, $0F ;2c 2b
-    sla a ;2c 2b
+    add a,a ;1c 1b
     ld e,a ;1c 1b
     ld d,$00 ;2c 2b
     add hl, de ;2c 1b
@@ -162,7 +162,7 @@ MenuHandler_Selected:
     ld hl, ChangeOptionHandler_table
     ldh a, [MENU_POSITION]
     and a, $0F
-    sla a
+    add a,a
     add a,l
     ld l, a ;add a into hl -- since hl is byte-aligned, we only need to add into l 
     ;load the address from the table entry in [hl] into hl
@@ -372,9 +372,9 @@ IF SCREEN_FLIP_H==0
     sub a,e
 ENDC
 
-sla a ; Multiply by 8
-sla a
-sla a        
+add a,a ; Multiply by 8
+add a,a
+add a,a        
 add a,[hl] ;a = Cursor position + offset calculated above
 ld [hl], a
 
