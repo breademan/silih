@@ -9,7 +9,23 @@ Blank_Display:
   ld a, 0
   ld [wLCDC], a
   ldh [rLCDC], a
-  
+
+Reset_vram:
+  ld  a,$1
+  ldh  [rVBK],a
+  xor a
+  ld  hl,$8000
+.reset_vram1_loop ;resets VRAM bank 1
+  ld  [hl+],a
+  bit 5,h
+  jr  z,.reset_vram1_loop
+  ldh  [rVBK],a
+  ld  hl,$8000
+  cpl    ;Modify to fill with $FF instead of $00 -- this should make all the unused UI tiles $FF
+.reset_vram0_loop ;Resets VRAM bank 0
+  ld  [hl+],a
+  bit 5,h
+  jr  z,.reset_vram0_loop
 
 ;Clears HRAM between FF80 and FFFF, inclusive, since HRAM likely contains some code from the loader.
 ClearHRAM:
@@ -331,6 +347,8 @@ InitDitherTable:
 call PrepareCameraOpts
 call UpdateCameraOpts
   
+ld a, UI_RAMBANK
+ldh [rSVBK],a
 call InitMenuState_CameraOpts
 
 ;TEST trampoline caller

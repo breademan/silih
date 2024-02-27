@@ -33,8 +33,7 @@ launch:
         ;Quits when d is $80 aka d's bit 7 is set
     ld de, $2000 ; de: source data -- each RAMbank is $1000 in size
     xor a
-    ldh [rSVBK],a ;Should be 0 anyway, but let's zero it out just in case.
-    ;NOTE: VERIFY THAT SVBK RETURNS 0 -- if it switches bank to 1, you need to change it to start at 1 and increment _after_ an inner loop
+    ldh [rSVBK],a     ;This relies on SVBK reading zero if zero is written -- if it returns 1, you need to increment _after_ an inner loop
 .copy_payload_banked_outer
  
     ld hl, $D000 ; hl: start of destination WRAM bank
@@ -53,9 +52,6 @@ launch:
     bit 7,d
     jr z,.copy_payload_banked_outer
     
-    xor a
-    ldh [rSVBK],a ;reset RAM bank
-
     ld  hl,$8000 ; start of VRAM
     ld  de,vram_data ; source of VRAM code
 .copy_code_to_vram ; copies the data in $0000 to $0FFF to $8000-87FF (VRAM)
@@ -228,23 +224,7 @@ vram_start: ; VRAM code start
     inc de
     dec c
     jr  nz,.hdma_transfer3
-    xor a
-    ldh  [rSVBK],a ;Switch back to WRAM Bank 0
-    ld  a,$1
-    ldh  [rVBK],a
-    xor a
-    ld  hl,$8000
-.reset_vram ;resets VRAM bank 1
-    ld  [hl+],a
-    bit 5,h
-    jr  z,.reset_vram
-    ldh  [rVBK],a
-    ld  hl,$8000
-    cpl    ;Modify to fill with $FF instead of $00 -- this should make all the unused UI tiles $FF
-.reset_vram0 ;Resets VRAM bank 0
-    ld  [hl+],a
-    bit 5,h
-    jr  z,.reset_vram0
+
     ld  a,$04
     ldh  [$FF4C],a                      ; set as DMG
     ld  a,$01

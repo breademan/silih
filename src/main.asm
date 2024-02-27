@@ -363,16 +363,19 @@ StartCapture:
 ;Assumes VRAM accessible and size of < FF bytes.
 ;src hl
 ;dest de
-;size b (in bytes)
+;size b (in source bytes), minus one (this is so that we can transfer $100 bytes and a size of 0 is unused)
 ;If src is <$FF bytes and L starts at 0, we can speed this up using inc r8 and possibly changing the counter check condition
 memcpy_1bpp:
+  inc b
+  .loop
     ld a, [hli]
+    ld [de],a
     inc de ; 1b 2c
     ld [de], a
     inc de ; 1b 2c
     dec b ;since dec r16 doesn't set flags, we'd need extra instructions to check for sizes > $FF
-    jp nz, memcpy_1bpp
-    ret
+    jp nz, memcpy_1bpp.loop
+  ret
   
   DEF BLANK_TILE_ID EQU $7F
 
