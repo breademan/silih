@@ -1,4 +1,3 @@
-DEF TEST_CALLEE_RAMBANK EQU 3
 SECTION "Trampoline Callee SECTION",ROM0[$1000 + ($1000*TEST_CALLEE_RAMBANK)]
 Test_Callee_Storage::
     LOAD "Trampoline Callee LOAD", WRAMX [$D000]

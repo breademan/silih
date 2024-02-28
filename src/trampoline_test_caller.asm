@@ -1,4 +1,3 @@
-DEF TEST_CALLER_RAMBANK EQU 2
 SECTION "Trampoline Caller SECTION",ROM0[$1000 + ($1000*TEST_CALLER_RAMBANK)]
 Test_Caller_Storage::
     LOAD "Trampoline Caller LOAD", WRAMX [$D000]

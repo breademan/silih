@@ -6,6 +6,14 @@ INCLUDE "src/loader/loader.asm"
 
 INCLUDE "src/hram.asm"
 
+DEF UI_RAMBANK EQU 1
+DEF STOCK_RAMBANK EQU 2
+DEF TEST_CALLER_RAMBANK EQU 3
+DEF TEST_CALLEE_RAMBANK EQU 4
+DEF BACKUP_BANK EQU 5
+;DEF SAVE_RAMBANK EQU 2
+;DEF INIT_RAMBANK EQU 2
+
 ;Set if the screen is flipped vertically
 DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally
@@ -948,8 +956,108 @@ UpdateOptionBuffer_CamOptG:
   ret
 
 ;----------------------------------------------------------------------------------------------------------
+;TODO: May not be valid for all versions.
+;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
+DEF ROM_MEMCLR_ADDR EQU $043f
+;Due to RAMbank switching immediately before handover, this must either be located in unbanked RAM, or use a trampoline at the end
+StartHandover:
+  di;Vblank ISR might interfere with our code -- disable interrupts, though we will disable the screen, so this should not be a problem.
+  ;Load HRAM stub into HRAM
+  
+  ;Load check + OAM transfer code into Vbank1, then switch to Vbank 0
+  ;turn LCD off -- otherwise, blanking VRAM will have 'streaks' where it was not cleared.
+  .waitVBlank: ; Do not turn the LCD off outside of VBlank
+  ldh a, [rLY]
+  cp 144
+  jr c, .waitVBlank
+
+  xor a
+  ldh [rLCDC], a
+  ;Clear VRAM1 attribute tables 9800-9bff
+  ld a,$01
+  ldh [rVBK],a
+  
+  ld hl,$9800
+  ld b, $9c
+  :xor a
+  ld [hli],a
+  ld a,h
+  cp b
+  jr nz,:-
 
 
+  xor a
+  ldh [rVBK],a
+  ;Move WRAM0 into its own RAMbank to restore from storage (this should be done in init, or even possibly in the loader to save space)
+
+  ;Switch mapped RAMbank to one dedicated for use by the stock ROM
+  ld a,STOCK_RAMBANK
+  ldh [rSVBK],a
+
+  ;Load HRAM stub
+  ld hl, .HRAM_stub
+  ld de, _HRAM
+  ld b, HRAM_stub_size
+  : ld a,[hli]
+    ld [de], a
+    inc de
+    dec b
+    jr nz,:-
+  ;load the rest of HRAM with 00s
+  xor a
+  ld b,$7F-HRAM_stub_size
+  :ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+
+  ;Copy Init code from ROM and NOP out the HRAM clear/OAM copy functions $150-19f -- $50 bytes
+  ld hl, $0150
+  ld de, $D000
+  ld b, $50
+  : ld a,[hli]
+    ld [de],a
+    inc de
+    dec b
+    jr nz,:-
+  ;add wram memclr and complete handover code to the end
+  ld hl, .memclr_wram_and_complete_handover_payload
+  ld b,13
+  :ld a,[hli]
+  ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+
+  ;patch out the call to memclr WRAM at +$87,88,89
+  ld hl,$D037
+  xor a
+  ld [hli],a
+  ld [hli],a
+  ld [hli],a
+
+  jp $D000 ;run copy of init code with patches
+
+  .HRAM_stub ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
+  DEF HRAM_stub_size EQU 10
+  ld a,$d4
+  ldh [rDMA],a
+  ld a,$29 ;normally $28-- $29 for a canary value
+  :dec a
+  jr nz, :-
+  ret
+  .HRAM_stub_end
+
+  ;decimal 13 bytes
+  .memclr_wram_and_complete_handover_payload
+  ld hl, $C000 ;3b
+  ld bc,$1ff0 ;3b ;If we do a full erase, we'll also erase the stack, which at this point in the program is used to return. Solve this by not erasing the last few bytes, which should be used for stack anyway.
+  ;instead of calling memclr, we 'call' it with a fake return address
+  DEF HANDOVER_ADDR EQU $01ac
+  ld de,HANDOVER_ADDR ;3b ;TODO push return address: point in the ROM where we return control ; is it stored LE or BEndian -- this may be backwards
+  push de ;1b
+  jp ROM_MEMCLR_ADDR ;3b
+  .memclr_wram_and_complete_handover_payload_end
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 

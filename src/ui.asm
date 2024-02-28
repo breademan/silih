@@ -1,4 +1,3 @@
-DEF UI_RAMBANK EQU 1
 SECTION "Payload UI Data SECTION",ROM0[$1000 + ($1000*UI_RAMBANK)]
 UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
@@ -99,6 +98,9 @@ MenuHandler_CameraOpts:
     bit JOYPAD_START, b ;check START
 
     :bit JOYPAD_SELECT, b ;check SELECT
+    jr z,:+
+    ;Start handover, possibly after waiting for capture to complete
+    call StartHandover
 
     :bit JOYPAD_B, b; check B - take picure
     jr z,:+
@@ -693,5 +695,17 @@ SetNVHtoEdgeMode:
   ld [hl],b ;2c1b  ;load b into VH working reg <- HL method uses hl to save 2c2b, requires N/VH work registers be contiguous
   ret
 
+;Restores Rambank 0 from backup stored in BACKUP_BANK
+RestoreBank0:
+  ld a, BACKUP_BANK
+  ldh [rSVBK], a   ;bank switch to backup bank
+  ld hl, $D000
+  ld de, $C000
+  :ld a, [hli]
+  ld [de],a
+  inc de
+  bit 4,h
+  jr nz, :-
+  ret
 
 ENDL

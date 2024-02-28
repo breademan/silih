@@ -26,7 +26,14 @@ Reset_vram:
   ld  [hl+],a
   bit 5,h
   jr  z,.reset_vram0_loop
-
+  .blank_oam
+  xor a
+  ld  hl,$FE00
+  ld  c,$A0
+  .blank_oam_loop
+  ld  [hl+],a
+  dec c
+  jr nz,.blank_oam_loop
 ;Clears HRAM between FF80 and FFFF, inclusive, since HRAM likely contains some code from the loader.
 ClearHRAM:
     xor a
@@ -43,6 +50,18 @@ ClearOptionLinesBuffer:
   :ld [hli], a
   dec b
   jr nz,:-
+
+;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
+BackupBank0:
+ld a, BACKUP_BANK
+ldh [rSVBK], a   ;bank switch to backup bank
+ld hl, $C000
+ld de, $D000
+:ld a, [hli]
+ld [de],a
+inc de
+bit 4,d
+jr nz, :-
 
 Load_VBlank_ISR_stub:
 ;The first thing the ROM's VBlank ISR does is PUSHes all registers, then jumps to HRAM (presumably for OAM DMA).
