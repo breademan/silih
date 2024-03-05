@@ -1,12 +1,16 @@
 
 Blank_Display:
+  ;If LCD is already off (as is the case in a ROM->RAM handover), skip the check for VBlank
+  ldh a,[rLCDC]
+  bit 7,a
+  jr z, :+
 .waitVBlank: ; Do not turn the LCD off outside of VBlank
   ldh a, [rLY]
   cp 144
-  jp c, .waitVBlank
+  jr c, .waitVBlank
 
   ; Turn the LCD off
-  ld a, 0
+  :xor a
   ld [wLCDC], a
   ldh [rLCDC], a
 
@@ -251,7 +255,9 @@ BuildUITilemapV:
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt
 Init_LCD:
-  ; Set scroll register to scroll down by 112px
+  ; Set scroll register to scroll down 112px, right 0px
+  xor a
+  ldh [rSCX], a
   ld a, $70
   ldh [rSCY], a
   ; Set window location

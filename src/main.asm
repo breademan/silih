@@ -89,7 +89,7 @@ SECTION "Payload SECTION",ROM0[$1000]
 PayloadStorage::
     LOAD "Payload LOAD", WRAM0 [$C000]
 PayloadEntrypoint:
-    ld a, 0
+    xor a
     ldh [rNR52], a ;disable sound
   
     ld sp, _RAMBANK-1 ;set the stack pointer to top of lowRAM
@@ -955,8 +955,77 @@ UpdateOptionBuffer_CamOptG:
   ENDC  
   ret
 
+;--------------------------------Handover Payloads---------------------------------------------------------
+HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
+  .start
+  ;switch bank to VRAM1
+  ld a,$01 ;2b
+  ldh [rVBK],a ;2b
+  ;jump to location of our checker
+  jp HandoverChecker ;3b
+  .return_point
+  DEF HRAM_RETURN_POINT EQU (.return_point - .start) + $FF80
+  ;switch bank from VRAM1
+  ;xor a ;1b -- must be done in checker function, as we don't have enough space here
+  ldh [rVBK],a ;2b
+  ret ;1b
+  .end
+  DEF HRAM_stub_size EQU HRAM_stock_stub.end - HRAM_stock_stub.start
+  assert HRAM_stub_size <= 10, "HRAM_stock_stub must fit within 10 bytes"
+
+  ;decimal 13 bytes -- goes at the end of the copied init sequence in VRAM1 or SRAM
+  ;calls memclr on WRAM (except stack) and completes handover to later part of ROM init sequence
+CompleteHandover_storage:
+  .start
+  ld hl, $C000 ;3b
+  ld bc,$1ff0 ;3b ;Erase all except (a few bytes of) stack, so we can properly return.
+  ;'Call' memclr with a return address of HANDOVER_ADDR. This code will be erased during the memclr call, so we can't return here.
+  DEF HANDOVER_ADDR EQU $01ac
+  ld de,HANDOVER_ADDR ;3b ;push return address: point in the ROM where we return control
+  push de ;1b
+  jp ROM_MEMCLR_ADDR ;3b
+  .end
+  DEF CompleteHandover_SIZE EQU CompleteHandover_storage.end - CompleteHandover_storage.start
+
+checker_payload:
+  DEF HandoverChecker EQU _VRAM
+  .start
+  ldh a, [joypad_active]
+  and a,(JOYPAD_START_MASK | JOYPAD_SELECT_MASK)
+  cp a, (JOYPAD_START_MASK | JOYPAD_SELECT_MASK)
+  jr z, .handoverToRAM
+  ;standard OAM copy 
+  ;TODO: Since we do some work in HRAM and the above check, we can move the two 'start DMA' instructions to the start and shorten the counter.
+    ;If we choose to handover, we must ensure we use enough cycles before accessing WRAM (restore unbanked WRAM0 code).  
+  ld a,$d4
+  ldh [rDMA],a
+  ld a,$28
+  :dec a
+  jr nz, :-
+  xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
+  jp HRAM_RETURN_POINT
+  
+  .handoverToRAM
+  ;turn off the screen to ensure VRAM1 is accessible
+  xor a
+  ldh [rLCDC],a
+  ;restore unbanked WRAM0 code
+  ld a,BACKUP_BANK
+  ldh [rSVBK],a
+  ld de, _RAM
+  ld hl, _RAMBANK
+  :ld a,[hli]
+  ld [de], a
+  inc de
+  bit 4,d ;copy until d reaches $D0
+  jr z,:-
+  jp _RAM
+
+  .end
+checker_payload_end:
+  DEF checker_payload_size EQU checker_payload_end-checker_payload
 ;----------------------------------------------------------------------------------------------------------
-;TODO: May not be valid for all versions.
+;TODO: A hardcoded address may not be valid for all versions.
 ;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
 DEF ROM_MEMCLR_ADDR EQU $043f
 ;Due to RAMbank switching immediately before handover, this must either be located in unbanked RAM, or use a trampoline at the end
@@ -972,7 +1041,7 @@ StartHandover:
   jr c, .waitVBlank
 
   xor a
-  ldh [rLCDC], a
+  ldh [rLCDC], a ;turn off LCD -- this enables VRAM will always be accessible for the long copy coming up -- otherwise will rst and we'll lose control
   ;Clear VRAM1 attribute tables 9800-9bff
   ld a,$01
   ldh [rVBK],a
@@ -985,17 +1054,25 @@ StartHandover:
   cp b
   jr nz,:-
 
-
+  ;Load checker payload into VRAM1 tiledata $8000-97FF
+  ld de, _VRAM ;destination: VRAM1:8000
+  ld hl, checker_payload
+  ld b, checker_payload_size
+  :ld a,[hli]
+  ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+  ;Switch back to VRAM0
   xor a
   ldh [rVBK],a
-  ;Move WRAM0 into its own RAMbank to restore from storage (this should be done in init, or even possibly in the loader to save space)
 
   ;Switch mapped RAMbank to one dedicated for use by the stock ROM
   ld a,STOCK_RAMBANK
   ldh [rSVBK],a
 
   ;Load HRAM stub
-  ld hl, .HRAM_stub
+  ld hl, HRAM_stock_stub
   ld de, _HRAM
   ld b, HRAM_stub_size
   : ld a,[hli]
@@ -1021,8 +1098,8 @@ StartHandover:
     dec b
     jr nz,:-
   ;add wram memclr and complete handover code to the end
-  ld hl, .memclr_wram_and_complete_handover_payload
-  ld b,13
+  ld hl, CompleteHandover_storage
+  ld b, CompleteHandover_SIZE
   :ld a,[hli]
   ld [de],a
   inc de
@@ -1038,26 +1115,6 @@ StartHandover:
 
   jp $D000 ;run copy of init code with patches
 
-  .HRAM_stub ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
-  DEF HRAM_stub_size EQU 10
-  ld a,$d4
-  ldh [rDMA],a
-  ld a,$29 ;normally $28-- $29 for a canary value
-  :dec a
-  jr nz, :-
-  ret
-  .HRAM_stub_end
-
-  ;decimal 13 bytes
-  .memclr_wram_and_complete_handover_payload
-  ld hl, $C000 ;3b
-  ld bc,$1ff0 ;3b ;If we do a full erase, we'll also erase the stack, which at this point in the program is used to return. Solve this by not erasing the last few bytes, which should be used for stack anyway.
-  ;instead of calling memclr, we 'call' it with a fake return address
-  DEF HANDOVER_ADDR EQU $01ac
-  ld de,HANDOVER_ADDR ;3b ;TODO push return address: point in the ROM where we return control ; is it stored LE or BEndian -- this may be backwards
-  push de ;1b
-  jp ROM_MEMCLR_ADDR ;3b
-  .memclr_wram_and_complete_handover_payload_end
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 
