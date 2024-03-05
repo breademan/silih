@@ -990,30 +990,29 @@ CompleteHandover_storage:
 checker_payload:
   DEF HandoverChecker EQU _VRAM
   .start
-  ldh a, [joypad_active]
-  and a,(JOYPAD_START_MASK | JOYPAD_SELECT_MASK)
-  cp a, (JOYPAD_START_MASK | JOYPAD_SELECT_MASK)
-  jr z, .handoverToRAM
-  ;standard OAM copy 
-  ;TODO: Since we do some work in HRAM and the above check, we can move the two 'start DMA' instructions to the start and shorten the counter.
-    ;If we choose to handover, we must ensure we use enough cycles before accessing WRAM (restore unbanked WRAM0 code).  
+  ;OAM copy 
   ld a,$d4
   ldh [rDMA],a
-  ld a,$28
+  ld a,$24 ;OAM copy waitloop
   :dec a
   jr nz, :-
+  ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
+  ldh a, [joypad_active] ; 3c
+  and a,(JOYPAD_START_MASK | JOYPAD_SELECT_MASK) ; 2c
+  cp a, (JOYPAD_START_MASK | JOYPAD_SELECT_MASK) ; 2c
+  jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
   xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
   jp HRAM_RETURN_POINT
   
   .handoverToRAM
   ;turn off the screen to ensure VRAM1 is accessible
-  xor a
-  ldh [rLCDC],a
+  xor a ;1c
+  ldh [rLCDC],a ;3c
   ;restore unbanked WRAM0 code
-  ld a,BACKUP_BANK
-  ldh [rSVBK],a
-  ld de, _RAM
-  ld hl, _RAMBANK
+  ld a,BACKUP_BANK ;2c
+  ldh [rSVBK],a ;3c
+  ld de, _RAM ;3c
+  ld hl, _RAMBANK ;3c
   :ld a,[hli]
   ld [de], a
   inc de
