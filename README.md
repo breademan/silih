@@ -26,6 +26,7 @@ If for some reason you want to run it in an emulator, some emulators do support 
 ## Controls (subject to change because they're terrible)
 - __A__: Change an option. Pressing B will let you exit the menu.
 - __B__: Take a photo. Pressing B again will save the picture, and pressing A will discard it.
+- __SELECT+DOWN__: Switch to stock software stored on the ROM. You can return to Silihcam by holding SELECT+UP.
 
 ## Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.

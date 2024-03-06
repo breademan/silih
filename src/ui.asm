@@ -1,4 +1,3 @@
-DEF UI_RAMBANK EQU 1
 SECTION "Payload UI Data SECTION",ROM0[$1000 + ($1000*UI_RAMBANK)]
 UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
@@ -14,26 +13,6 @@ ChangeOptionHandler_table:
   
   ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
     .end
-
-
-DEF JOYPAD_DOWN EQU 7
-DEF JOYPAD_UP EQU 6
-DEF JOYPAD_LEFT EQU 5
-DEF JOYPAD_RIGHT EQU 4
-DEF JOYPAD_START EQU 3
-DEF JOYPAD_SELECT EQU 2
-DEF JOYPAD_B EQU 1
-DEF JOYPAD_A EQU 0
-
-DEF JOYPAD_DOWN_MASK EQU $01<<7
-DEF JOYPAD_UP_MASK EQU $01<<6
-DEF JOYPAD_LEFT_MASK EQU $01<<5
-DEF JOYPAD_RIGHT_MASK EQU $01<<4
-DEF JOYPAD_START_MASK EQU $01<<3
-DEF JOYPAD_SELECT_MASK EQU $01<<2
-DEF JOYPAD_B_MASK EQU $01<<1
-DEF JOYPAD_A_MASK EQU $01<<0
-
 
 HandleInput::
     ldh a, [MENU_STATE]
@@ -99,6 +78,11 @@ MenuHandler_CameraOpts:
     bit JOYPAD_START, b ;check START
 
     :bit JOYPAD_SELECT, b ;check SELECT
+    jr z,:+
+    ;Start handover, possibly after waiting for capture to complete
+      bit JOYPAD_DOWN, b
+      jr z,:+
+      call StartHandover
 
     :bit JOYPAD_B, b; check B - take picure
     jr z,:+
@@ -693,5 +677,17 @@ SetNVHtoEdgeMode:
   ld [hl],b ;2c1b  ;load b into VH working reg <- HL method uses hl to save 2c2b, requires N/VH work registers be contiguous
   ret
 
+;Restores Rambank 0 from backup stored in BACKUP_BANK
+RestoreBank0:
+  ld a, BACKUP_BANK
+  ldh [rSVBK], a   ;bank switch to backup bank
+  ld hl, $D000
+  ld de, $C000
+  :ld a, [hli]
+  ld [de],a
+  inc de
+  bit 4,h
+  jr nz, :-
+  ret
 
 ENDL

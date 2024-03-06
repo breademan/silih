@@ -6,6 +6,33 @@ INCLUDE "src/loader/loader.asm"
 
 INCLUDE "src/hram.asm"
 
+DEF UI_RAMBANK EQU 1
+DEF STOCK_RAMBANK EQU 2
+DEF TEST_CALLER_RAMBANK EQU 3
+DEF TEST_CALLEE_RAMBANK EQU 4
+DEF BACKUP_BANK EQU 5
+;DEF SAVE_RAMBANK EQU 2
+;DEF INIT_RAMBANK EQU 2
+DEF JOYPAD_DOWN EQU 7
+DEF JOYPAD_UP EQU 6
+DEF JOYPAD_LEFT EQU 5
+DEF JOYPAD_RIGHT EQU 4
+DEF JOYPAD_START EQU 3
+DEF JOYPAD_SELECT EQU 2
+DEF JOYPAD_B EQU 1
+DEF JOYPAD_A EQU 0
+
+DEF JOYPAD_DOWN_MASK EQU $01<<7
+DEF JOYPAD_UP_MASK EQU $01<<6
+DEF JOYPAD_LEFT_MASK EQU $01<<5
+DEF JOYPAD_RIGHT_MASK EQU $01<<4
+DEF JOYPAD_START_MASK EQU $01<<3
+DEF JOYPAD_SELECT_MASK EQU $01<<2
+DEF JOYPAD_B_MASK EQU $01<<1
+DEF JOYPAD_A_MASK EQU $01<<0
+
+
+
 ;Set if the screen is flipped vertically
 DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally
@@ -81,7 +108,7 @@ SECTION "Payload SECTION",ROM0[$1000]
 PayloadStorage::
     LOAD "Payload LOAD", WRAM0 [$C000]
 PayloadEntrypoint:
-    ld a, 0
+    xor a
     ldh [rNR52], a ;disable sound
   
     ld sp, _RAMBANK-1 ;set the stack pointer to top of lowRAM
@@ -170,6 +197,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 
   call DrawValueLines_DMAMethod 
 
+  ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
   ld a, $01 ;+2c2b
   ldh [VBlank_finished_flag], a ;+3c2b
@@ -363,16 +391,19 @@ StartCapture:
 ;Assumes VRAM accessible and size of < FF bytes.
 ;src hl
 ;dest de
-;size b (in bytes)
+;size b (in source bytes), minus one (this is so that we can transfer $100 bytes and a size of 0 is unused)
 ;If src is <$FF bytes and L starts at 0, we can speed this up using inc r8 and possibly changing the counter check condition
 memcpy_1bpp:
+  inc b
+  .loop
     ld a, [hli]
+    ld [de],a
     inc de ; 1b 2c
     ld [de], a
     inc de ; 1b 2c
     dec b ;since dec r16 doesn't set flags, we'd need extra instructions to check for sizes > $FF
-    jp nz, memcpy_1bpp
-    ret
+    jp nz, memcpy_1bpp.loop
+  ret
   
   DEF BLANK_TILE_ID EQU $7F
 
@@ -944,8 +975,165 @@ UpdateOptionBuffer_CamOptG:
   ENDC  
   ret
 
-;----------------------------------------------------------------------------------------------------------
+;--------------------------------Handover Payloads---------------------------------------------------------
+HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
+  .start
+  ;switch bank to VRAM1
+  ld a,$01 ;2b
+  ldh [rVBK],a ;2b
+  ;jump to location of our checker
+  jp HandoverChecker ;3b
+  .return_point
+  DEF HRAM_RETURN_POINT EQU (.return_point - .start) + $FF80
+  ;switch bank from VRAM1
+  ;xor a ;1b -- must be done in checker function, as we don't have enough space here
+  ldh [rVBK],a ;2b
+  ret ;1b
+  .end
+  DEF HRAM_stub_size EQU HRAM_stock_stub.end - HRAM_stock_stub.start
+  assert HRAM_stub_size <= 10, "HRAM_stock_stub must fit within 10 bytes"
 
+  ;decimal 13 bytes -- goes at the end of the copied init sequence in VRAM1 or SRAM
+  ;calls memclr on WRAM (except stack) and completes handover to later part of ROM init sequence
+CompleteHandover_storage:
+  .start
+  ld hl, $C000 ;3b
+  ld bc,$1ff0 ;3b ;Erase all except (a few bytes of) stack, so we can properly return.
+  ;'Call' memclr with a return address of HANDOVER_ADDR. This code will be erased during the memclr call, so we can't return here.
+  DEF HANDOVER_ADDR EQU $01ac
+  ld de,HANDOVER_ADDR ;3b ;push return address: point in the ROM where we return control
+  push de ;1b
+  jp ROM_MEMCLR_ADDR ;3b
+  .end
+  DEF CompleteHandover_SIZE EQU CompleteHandover_storage.end - CompleteHandover_storage.start
+
+checker_payload:
+  DEF HandoverChecker EQU _VRAM
+  .start
+  ;OAM copy 
+  ld a,$d4
+  ldh [rDMA],a
+  ld a,$24 ;OAM copy waitloop
+  :dec a
+  jr nz, :-
+  ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
+  ldh a, [joypad_active] ; 3c
+  DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_UP_MASK)
+  and a,ROM_RAM_HANDOVER_MASK ; 2c
+  cp a, ROM_RAM_HANDOVER_MASK ; 2c
+  jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
+  xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
+  jp HRAM_RETURN_POINT
+  
+  .handoverToRAM
+  ;turn off the screen to ensure VRAM1 is accessible
+  xor a ;1c
+  ldh [rLCDC],a ;3c
+  ;restore unbanked WRAM0 code
+  ld a,BACKUP_BANK ;2c
+  ldh [rSVBK],a ;3c
+  ld de, _RAM ;3c
+  ld hl, _RAMBANK ;3c
+  :ld a,[hli]
+  ld [de], a
+  inc de
+  bit 4,d ;copy until d reaches $D0
+  jr z,:-
+  jp _RAM
+
+  .end
+checker_payload_end:
+  DEF checker_payload_size EQU checker_payload_end-checker_payload
+;----------------------------------------------------------------------------------------------------------
+;TODO: A hardcoded address may not be valid for all versions.
+;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
+DEF ROM_MEMCLR_ADDR EQU $043f
+;Due to RAMbank switching immediately before handover, this must either be located in unbanked RAM, or use a trampoline at the end
+StartHandover:
+  di;Vblank ISR might interfere with our code -- disable interrupts, though we will disable the screen, so this should not be a problem.
+  ;Load HRAM stub into HRAM
+  
+  ;Load check + OAM transfer code into Vbank1, then switch to Vbank 0
+  ;turn LCD off -- otherwise, blanking VRAM will have 'streaks' where it was not cleared.
+  .waitVBlank: ; Do not turn the LCD off outside of VBlank
+  ldh a, [rLY]
+  cp 144
+  jr c, .waitVBlank
+
+  xor a
+  ldh [rLCDC], a ;turn off LCD -- this enables VRAM will always be accessible for the long copy coming up -- otherwise will rst and we'll lose control
+  ;Clear VRAM1 attribute tables 9800-9bff
+  ld a,$01
+  ldh [rVBK],a
+  
+  ld hl,$9800
+  ld b, $9c
+  :xor a
+  ld [hli],a
+  ld a,h
+  cp b
+  jr nz,:-
+
+  ;Load checker payload into VRAM1 tiledata $8000-97FF
+  ld de, _VRAM ;destination: VRAM1:8000
+  ld hl, checker_payload
+  ld b, checker_payload_size
+  :ld a,[hli]
+  ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+  ;Switch back to VRAM0
+  xor a
+  ldh [rVBK],a
+
+  ;Switch mapped RAMbank to one dedicated for use by the stock ROM
+  ld a,STOCK_RAMBANK
+  ldh [rSVBK],a
+
+  ;Load HRAM stub
+  ld hl, HRAM_stock_stub
+  ld de, _HRAM
+  ld b, HRAM_stub_size
+  : ld a,[hli]
+    ld [de], a
+    inc de
+    dec b
+    jr nz,:-
+  ;load the rest of HRAM with 00s
+  xor a
+  ld b,$7F-HRAM_stub_size
+  :ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+
+  ;Copy Init code from ROM and NOP out the HRAM clear/OAM copy functions $150-19f -- $50 bytes
+  ld hl, $0150
+  ld de, $D000
+  ld b, $50
+  : ld a,[hli]
+    ld [de],a
+    inc de
+    dec b
+    jr nz,:-
+  ;add wram memclr and complete handover code to the end
+  ld hl, CompleteHandover_storage
+  ld b, CompleteHandover_SIZE
+  :ld a,[hli]
+  ld [de],a
+  inc de
+  dec b
+  jr nz,:-
+
+  ;patch out the call to memclr WRAM at +$87,88,89
+  ld hl,$D037
+  xor a
+  ld [hli],a
+  ld [hli],a
+  ld [hli],a
+
+  jp $D000 ;run copy of init code with patches
 
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"

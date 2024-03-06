@@ -1,16 +1,43 @@
 
 Blank_Display:
+  ;If LCD is already off (as is the case in a ROM->RAM handover), skip the check for VBlank
+  ldh a,[rLCDC]
+  bit 7,a
+  jr z, :+
 .waitVBlank: ; Do not turn the LCD off outside of VBlank
   ldh a, [rLY]
   cp 144
-  jp c, .waitVBlank
+  jr c, .waitVBlank
 
   ; Turn the LCD off
-  ld a, 0
+  :xor a
   ld [wLCDC], a
   ldh [rLCDC], a
-  
 
+Reset_vram:
+  ld  a,$1
+  ldh  [rVBK],a
+  xor a
+  ld  hl,$8000
+.reset_vram1_loop ;resets VRAM bank 1
+  ld  [hl+],a
+  bit 5,h
+  jr  z,.reset_vram1_loop
+  ldh  [rVBK],a
+  ld  hl,$8000
+  cpl    ;Modify to fill with $FF instead of $00 -- this should make all the unused UI tiles $FF
+.reset_vram0_loop ;Resets VRAM bank 0
+  ld  [hl+],a
+  bit 5,h
+  jr  z,.reset_vram0_loop
+  .blank_oam
+  xor a
+  ld  hl,$FE00
+  ld  c,$A0
+  .blank_oam_loop
+  ld  [hl+],a
+  dec c
+  jr nz,.blank_oam_loop
 ;Clears HRAM between FF80 and FFFF, inclusive, since HRAM likely contains some code from the loader.
 ClearHRAM:
     xor a
@@ -27,6 +54,18 @@ ClearOptionLinesBuffer:
   :ld [hli], a
   dec b
   jr nz,:-
+
+;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
+BackupBank0:
+ld a, BACKUP_BANK
+ldh [rSVBK], a   ;bank switch to backup bank
+ld hl, $C000
+ld de, $D000
+:ld a, [hli]
+ld [de],a
+inc de
+bit 4,d
+jr nz, :-
 
 Load_VBlank_ISR_stub:
 ;The first thing the ROM's VBlank ISR does is PUSHes all registers, then jumps to HRAM (presumably for OAM DMA).
@@ -216,7 +255,9 @@ BuildUITilemapV:
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt
 Init_LCD:
-  ; Set scroll register to scroll down by 112px
+  ; Set scroll register to scroll down 112px, right 0px
+  xor a
+  ldh [rSCX], a
   ld a, $70
   ldh [rSCY], a
   ; Set window location
@@ -331,6 +372,8 @@ InitDitherTable:
 call PrepareCameraOpts
 call UpdateCameraOpts
   
+ld a, UI_RAMBANK
+ldh [rSVBK],a
 call InitMenuState_CameraOpts
 
 ;TEST trampoline caller
