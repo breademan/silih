@@ -37,6 +37,8 @@ DEF JOYPAD_A_MASK EQU $01<<0
 DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally
 DEF SCREEN_FLIP_H EQU 1
+;Set if the captures are buffered in alternating VRAM banks
+DEF CAPTURE_BUFFERING EQU 0
 
 ;This section exists to ensure the addresses of WRAM tables are all aligned on 256bytes (h never changes)
 ;If we run out of space, make another $100-size section
@@ -233,9 +235,11 @@ CapturingHandler:
   ;Whichever VRAM bank we're currently in, switch. 
   ;switchVRAMBank can be done anytime before reading in WRAM, ideally right before waiting for capture 
       ;However, doing so will increase the between-capture frame time by a few clock cycles.
+  IF CAPTURE_BUFFERING
   ldh a, [rVBK]
   xor a, $01 ;2b2c TODO may be replaced by cpl to save 1b1c, since only bit 0 is used.
   ldh [rVBK], a
+  ENDC
 
 .start_hdma_transfer
   xor a
@@ -340,9 +344,11 @@ DMAHandler:
     .toggleWindow
     ;Change the visibility of the window by swapping bit 5 of LCDC -- we want its value to be whatever old VRAM bank value was
     ;toggleWindow should be done after a VRAM transfer is complete, even if new capture shouldn't be started, so the new capture is displayed.
+    IF CAPTURE_BUFFERING
     ld a, [wLCDC]
     xor a, %00100000
     ld [wLCDC], a
+    ENDC
 
     ;If we're not going to restart a capture, change the viewfinder state to VF_STATE_PAUSED
     ldh a,[MENU_STATE]

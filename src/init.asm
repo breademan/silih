@@ -266,8 +266,12 @@ Init_LCD:
   ld a, $27 ; 20px + 7 base
   ldh [rWX], a
 
-  ; Turn the LCD on, Window on to be different from the current VRAM bank
+  ; Turn the LCD on, Window off to be different from the current VRAM bank
+  IF CAPTURE_BUFFERING
   ld a, LCDCF_ON | LCDCF_BGON | LCDCF_WINON | LCDCF_OBJON
+  ELSE
+  ld a, LCDCF_ON | LCDCF_BGON | LCDCF_WINOFF | LCDCF_OBJON
+  ENDC
   ld [wLCDC],a
   ldh [rLCDC], a
 
@@ -383,5 +387,9 @@ ldh [rSVBK],a
 call Trampoline_test_caller ;Set a watchpoint here and see if $DEADBEEF ends up in hlbc
 
 ;Switch VRAM bank to 1 so that it alternates in-sync with the window
+IF CAPTURE_BUFFERING
 ld a, $1 
+ELSE
+xor a ; if we're doing no-tear, then VBK should be 0 at all times
+ENDC
 ldh [rVBK], a
