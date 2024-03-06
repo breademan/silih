@@ -14,26 +14,6 @@ ChangeOptionHandler_table:
   ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
     .end
 
-
-DEF JOYPAD_DOWN EQU 7
-DEF JOYPAD_UP EQU 6
-DEF JOYPAD_LEFT EQU 5
-DEF JOYPAD_RIGHT EQU 4
-DEF JOYPAD_START EQU 3
-DEF JOYPAD_SELECT EQU 2
-DEF JOYPAD_B EQU 1
-DEF JOYPAD_A EQU 0
-
-DEF JOYPAD_DOWN_MASK EQU $01<<7
-DEF JOYPAD_UP_MASK EQU $01<<6
-DEF JOYPAD_LEFT_MASK EQU $01<<5
-DEF JOYPAD_RIGHT_MASK EQU $01<<4
-DEF JOYPAD_START_MASK EQU $01<<3
-DEF JOYPAD_SELECT_MASK EQU $01<<2
-DEF JOYPAD_B_MASK EQU $01<<1
-DEF JOYPAD_A_MASK EQU $01<<0
-
-
 HandleInput::
     ldh a, [MENU_STATE]
     add a,a     ;each jump table entry is 2 bytes long, so multiply MENU_STATE by 2
@@ -100,7 +80,9 @@ MenuHandler_CameraOpts:
     :bit JOYPAD_SELECT, b ;check SELECT
     jr z,:+
     ;Start handover, possibly after waiting for capture to complete
-    call StartHandover
+      bit JOYPAD_DOWN, b
+      jr z,:+
+      call StartHandover
 
     :bit JOYPAD_B, b; check B - take picure
     jr z,:+

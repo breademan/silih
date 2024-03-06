@@ -13,6 +13,25 @@ DEF TEST_CALLEE_RAMBANK EQU 4
 DEF BACKUP_BANK EQU 5
 ;DEF SAVE_RAMBANK EQU 2
 ;DEF INIT_RAMBANK EQU 2
+DEF JOYPAD_DOWN EQU 7
+DEF JOYPAD_UP EQU 6
+DEF JOYPAD_LEFT EQU 5
+DEF JOYPAD_RIGHT EQU 4
+DEF JOYPAD_START EQU 3
+DEF JOYPAD_SELECT EQU 2
+DEF JOYPAD_B EQU 1
+DEF JOYPAD_A EQU 0
+
+DEF JOYPAD_DOWN_MASK EQU $01<<7
+DEF JOYPAD_UP_MASK EQU $01<<6
+DEF JOYPAD_LEFT_MASK EQU $01<<5
+DEF JOYPAD_RIGHT_MASK EQU $01<<4
+DEF JOYPAD_START_MASK EQU $01<<3
+DEF JOYPAD_SELECT_MASK EQU $01<<2
+DEF JOYPAD_B_MASK EQU $01<<1
+DEF JOYPAD_A_MASK EQU $01<<0
+
+
 
 ;Set if the screen is flipped vertically
 DEF SCREEN_FLIP_V EQU 1
@@ -178,6 +197,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 
   call DrawValueLines_DMAMethod 
 
+  ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
   ld a, $01 ;+2c2b
   ldh [VBlank_finished_flag], a ;+3c2b
@@ -998,8 +1018,9 @@ checker_payload:
   jr nz, :-
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
   ldh a, [joypad_active] ; 3c
-  and a,(JOYPAD_START_MASK | JOYPAD_SELECT_MASK) ; 2c
-  cp a, (JOYPAD_START_MASK | JOYPAD_SELECT_MASK) ; 2c
+  DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_UP_MASK)
+  and a,ROM_RAM_HANDOVER_MASK ; 2c
+  cp a, ROM_RAM_HANDOVER_MASK ; 2c
   jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
   xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
   jp HRAM_RETURN_POINT
