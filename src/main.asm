@@ -510,20 +510,21 @@ UpdateValsMap_WRAM:
 ;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
 ;assumes de doesn't cross a byte address boundary
 UpdateByteInTilemap:
-  IF SCREEN_FLIP_H==1 ;17 cycles + call/ret
+  ;17 cycles + call/ret
   ld a, [hl] ;display high nybble +2c1b
   swap a ;+2c2b
   and a,$0F ;+2c2b
   or a,UI_ICONS_BASE_ID ;+1c1b
   ld [de], a ;+2c1b
+  IF SCREEN_FLIP_H==1 
   dec e ;low nybble ;+1c1b
+  ELSE
+  inc e
+  ENDC
   ld a,[hli] ;+2c1b
   and a,$0F ;+2c2b
   or a,UI_ICONS_BASE_ID ;+1c1b
   ld [de],a ;+2c1b
-  ELSE
-  ;TODO, just inc de instead of dec
-  ENDC
   ret ;+4c1b -- function call/ret is 10c/4b total
 
 
@@ -583,7 +584,8 @@ DrawValueLines_DMAMethod:
   ;restore HDMA registers (if we were in the middle of populating them to start a new HDMA transfer outside of the ISR). wHDMA regs must be contiguous.
   ld hl,wHDMA1 ;+3c3b
   ld a,[hli] ;+2c1b
-  ldh [rHDMA1],a ;+3c2b
+  ldh [rHDMA1],a ;+3c2b    :cp a,$5F ;this is an infinite loop since the high nybble from a is removed.
+
   ld a,[hli] ;+2c1b
   ldh [rHDMA2],a ;+3c2b
   ld a,[hli] ;+2c1b
@@ -873,7 +875,7 @@ UpdateOptionBuffer_EdgeMode:
   IF SCREEN_FLIP_H==1 ;With horizontal rotation, this is the leftmost (just under the text)
     ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
   ELSE ;With no rotation, this is the rightmost nybble
-    ld de, TILEMAP_UI_ORIGIN_H + $20 + $03 ;+3c3b
+    ld de, OptionLinesBuffer+VALSMAP_OFFSET+3 ;+3c3b
   ENDC
   ld a,[CamOptEdgeMode] ;+2c1b ;put the value of the selected option in a 
   or a,UI_ICONS_BASE_ID
@@ -884,67 +886,71 @@ UpdateOptionBuffer_CamOptE:
   GET_UI_OFFSET "CamOptE_RAM"
   IF SCREEN_FLIP_H==1
   ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
+  ELSE
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ENDC
   ld a, [CamOptE_RAM] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
-  ELSE
-  ENDC
   ret
 
 UpdateOptionBuffer_CamOptContrast:
   GET_UI_OFFSET "CamOptContrast"
   IF SCREEN_FLIP_H==1
   ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
+  ELSE
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ENDC
   ld a, [CamOptContrast] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
-  ELSE
-  ENDC
   ret
 
 UpdateOptionBuffer_DitherTable:
   GET_UI_OFFSET "CamOptDitherTable"
-
   IF SCREEN_FLIP_H==1
   ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
+  ELSE
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ENDC
   ld a, [CamOptDitherTable] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
-  ELSE
-  ENDC
   ret
 
 UpdateOptionBuffer_CamOptV:
   GET_UI_OFFSET "CamOptV_RAM"
   IF SCREEN_FLIP_H==1
   ld de, OptionLinesBuffer+VALSMAP_OFFSET
-
+  ELSE
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ENDC
   ld a, [CamOptV_RAM] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
-  ELSE
-  ENDC
   ret
 
 UpdateOptionBuffer_CamOptC: 
   GET_UI_OFFSET "CamOptC_RAM"
-  DEF VALSMAP_OFFSET += 1
    ;C; 4 nybbles from 2 bytes
   IF SCREEN_FLIP_H==1
     ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
     ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
-    ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
+    ld de, OptionLinesBuffer+VALSMAP_OFFSET+1 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
     call UpdateByteInTilemap ;3b
     inc e ;display LSB:H
     inc e 
     inc e ;^^+3c3b
-    DEF VALSMAP_OFFSET+=3
     call UpdateByteInTilemap ;3b
   ELSE
-    ;TODO same as above, but go to leftmost tile (add 1 to e instead of 7)
+  ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
+  ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
+  call UpdateByteInTilemap ;3b
+  dec e ;display LSB:H
+  dec e
+  dec e
+  call UpdateByteInTilemap ;3b  
   ENDC
   ret
 
@@ -952,33 +958,27 @@ UpdateOptionBuffer_CamOptC:
 UpdateOptionBuffer_CamOptO: 
   GET_UI_OFFSET "CamOptO_RAM"
   DEF VALSMAP_OFFSET +=1 ;O; 2 nybbles
+  ld hl, CamOptO_RAM
   IF SCREEN_FLIP_H==1 
   ;if screen flipped, de is second-to-right and we want to move it to the one-after-leftmost
-  ld hl, CamOptO_RAM
   ld de, OptionLinesBuffer+VALSMAP_OFFSET
-  call UpdateByteInTilemap
   ELSE
-  ;if not flipped, de is on rightmost side and we want to move it to the rightmost of next (if filling from low nybble) or one-before-rightmost (if filling from high)
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
   ENDC
+  call UpdateByteInTilemap
   ret
 
 
 UpdateOptionBuffer_CamOptG:
   GET_UI_OFFSET "CamOptG_RAM"
-  DEF VALSMAP_OFFSET +=1 ;G=2 nybbles
-
-  IF VALSMAP_OFFSET >= 20
-    DEF VALSMAP_OFFSET+=16
-  ENDC
   ;G; 2 nybbles
-  ;here, if flipped, de will be on the leftmost side, and we want to move it to one-after-leftmost
-  IF SCREEN_FLIP_H==1 
   ld hl,CamOptG_RAM
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
-  call UpdateByteInTilemap
+  IF SCREEN_FLIP_H==1 
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
   ELSE
-  ;if not flipped, de is on rightmost side and we want to move it to the rightmost of next (if filling from low nybble) or one-before-rightmost (if filling from high)
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2
   ENDC  
+  call UpdateByteInTilemap
   ret
 
 ;--------------------------------Handover Payloads---------------------------------------------------------

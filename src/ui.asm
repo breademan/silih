@@ -340,26 +340,27 @@ MoveCursorSpriteToNowhere:
 
 
 ;Clobbers hl, e
+;Moves cursor to nybble (relative to its icon)
 MoveCursorSpriteToSelectedNybble:
 call MoveCursorSpriteToMenuPosition
 ;Move the cursor down 8px
 ld hl,Sprite0_CursorY
 ld a, [hl] ;2c 1b
 add a, $08 ;2c 2b
-ld [hli], a
-;Move cursor right 8*(3-MENU_NYBBLE) if not flipped, 8*(MENU_NYBBLE if Hflipped)
+ld [hli], a ;write to CursorY; hl now points to CursorX
+;Move cursor right 8*(3-MENU_NYBBLE) if not flipped, -8*(MENU_NYBBLE if Hflipped)
 ldh a,[MENU_NYBBLE]
 and a, $0F ; only use current (low nybble) of MENU_NYBBLE
-IF SCREEN_FLIP_H==0
-    ld e,a
-    ld a, $03
-    sub a,e
-ENDC
 
 add a,a ; Multiply by 8
 add a,a
-add a,a        
-add a,[hl] ;a = Cursor position + offset calculated above
+add a,a
+IF SCREEN_FLIP_H==0
+  cpl   ;make the offset a negative number, such that the cursor moves left as you point to more significant nybbles
+  inc a
+ENDC
+add a,[hl] ;If H flipped, a = Cursor position + offset calculated above. If not Hflipped, subtract the offset instead.
+
 ld [hl], a
 
 ret
@@ -383,7 +384,7 @@ MoveCursorSpriteToMenuPosition:
     :rrca ;multiply a by 4*8
     rrca 
     rrca 
-    add a,$08 ;add 8 to get x-position on-screen
+    add a,$08 + (24*(SCREEN_FLIP_H ^ $01)) ;add 8 to get x-position on-screen, and right 3 tiles if not flipped
     ld [hld], a
     ld [hl], e
   ret

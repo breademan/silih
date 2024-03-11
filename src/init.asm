@@ -146,16 +146,17 @@ InitTilemapAttributes:
 
   ;Set bit 6+5 of each byte in the 32x32 attribute tilemap 1:0x9800-9BFF
   ;Bit 3 controls the VRAM bank the tile is pulled from
-  ld a, $68 ; flip Y and X attribute, bank 1
+  DEF INIT_TILEMAP_ATTRS EQU SCREEN_FLIP_V<<6 | SCREEN_FLIP_H<<5
+  ld a, INIT_TILEMAP_ATTRS | %00001000; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 
-  ;Top points to VBank1, fills until $99FF ($99C0-$99FF will be overwritten later)
+  ;Top points to VBank1, fills until $99FF ($99C0-$99FF will be overwritten later), used for the Window area's buffered captures
   .FillWithBank1:
     ld [hli], a
     bit 1, h
     jr z, .FillWithBank1
   ;Now, fill starting at 99C0
-  ld a, $60
+  ld a, INIT_TILEMAP_ATTRS
   ld hl, $99C0
   .FillWithBank0: ;Everything under the 12th tileline is filled with bank 0 tiles
     ld [hli], a
@@ -199,25 +200,33 @@ BuildWindowTilemap_VH_Flipped: ;Fills the top-left part of tilemap (used as wind
     :cp a,$80
     jr nz, .innerloop
 
-BuildBGTilemap_VH_Flipped: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles in the same fashion as the window tilemap
+BuildBGTilemap_TileIDCountup: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles in the same fashion as the window tilemap
   DEF TILEMAP0_CAPTURE1_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
-  ld a, $60
-  ld hl, TILEMAP0_CAPTURE1_ORIGIN
-  ld bc, $10
+  ld a, $7F ;this can be used as the counter within the row, too. If low nybble is (row-backwards:0, row-forwards:F),  we just wrote to the end of line
+  ld hl, TILEMAP0_CAPTURE1_ORIGIN + ($0F*SCREEN_FLIP_H) + ($20*13*SCREEN_FLIP_V);Depending on the VHflip, the original tilemap index will change (noflip =+0. Hflip = +$0F. Vflip = +13 lines (+32*13))
+  ld bc, $0010+($20*SCREEN_FLIP_H) - ($40*SCREEN_FLIP_V) ;The value to add to the tilemap index at the start/end of each line -- may be 2's complement negative
+  ld e, $10 ; e = inner counter (x-offset)
   .loop
-    dec a
-    ld [hli], a
-    bit 4, l ;every 16 tiles, skip the next 16 (since they are out-of-view)
-    jr z, :+
-    bit 2, l ;since non-window capture tilemap is offset by 4 for the UI, skip the out-of-view area if bits 4 AND 2 are set
-    jr z, :+
-    add hl, bc
-    :cp a,$80
+    inc a
+    IF SCREEN_FLIP_H
+      ld [hld], a ;depending on whether Hflip is set, this will decrement instead
+    ELSE
+      ld [hli],a
+    ENDC
+    dec e ; every 16 tiles
+    jr nz, :+ 
+    set 4,e
+    add hl, bc ;increment the tilemap index by half a row ($10) if increasing and no flip. If VHflip, decrement by $10. If Hflip, increment by $30. If Vflip, decrement by $30.
+    :cp a,$5F
     jr nz, .loop
 
 BuildHorizontalHeader: ;Fills the UI with the icons for each setting
   DEF TILEMAP_UI_ORIGIN_H EQU $99C0 ;$9800 + 14 rows -- this includes the 'edge' at the top left
-  ld hl, TILEMAP_UI_ORIGIN_H
+  IF SCREEN_FLIP_H
+    ld hl, TILEMAP_UI_ORIGIN_H
+  ELSE
+    ld hl, TILEMAP_UI_ORIGIN_H+3
+  ENDC
   ld de, UI_ICONS_ARRANGEMENT
 
   ld b, $2 ; number of lines (skips every other)
