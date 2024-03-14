@@ -154,20 +154,29 @@ StateVector_CountUsedAndFree:
   ld c, b  ; c = free count
 
   .loop:ld a, [hli]
-  cp a,$1D ; if carry, we read a free slot; if no carry, it's used.
+  cp a,$1E ; if carry, it's used.
   jr c,.used
   .free: inc c
   jr .check
   .used: inc b
   .check: ld a, LOW(STATEVECTOR_LAST_ADDR)+1
   cp a, l
-  jp nz, .loop ;if next address is within bounds, loop
+  jr nz, .loop ;if next address is within bounds, loop
 
   ; Write back used and free
   ld a,c
   ld [SAVE_SLOTS_FREE], a
   ld a,b
   ld [SAVE_SLOTS_USED], a
+
+  ;Add the initial free value to the vertical UI by calling 
+  ld hl, SAVE_SLOTS_FREE
+  IF SCREEN_FLIP_H
+  ld de, UIBuffer_Vertical+3
+  ELSE
+  ld de, UIBuffer_Vertical+2
+  ENDC
+  call UpdateByteInTilemap
   ret
 
 StateVector_Backup:

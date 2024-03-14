@@ -273,6 +273,15 @@ MenuHandler_TakeConfirm:
   ;load HL as either AE00 or BE00
   :call GenerateThumbnail
 
+  ;Now that we've saved, update the vertical UI buffer with the new free value
+  ld hl, SAVE_SLOTS_FREE
+  IF SCREEN_FLIP_H
+  ld de, UIBuffer_Vertical+3
+  ELSE
+  ld de, UIBuffer_Vertical+2
+  ENDC
+  call UpdateByteInTilemap
+
   .save_cleanup
   ld h,$00
   ld [hl],h ; disable SRAM writes

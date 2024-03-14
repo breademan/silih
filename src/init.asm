@@ -185,8 +185,9 @@ ld [hli],a
 ld [hli],a
 dec b
 jr nz,:-
-  
-BuildWindowTilemap_VH_Flipped: ;Fills the top-left part of tilemap (used as window) to map to capture tiles
+
+IF CAPTURE_BUFFERING
+BuildWindowTilemap: ;Fills the top-left part of tilemap (used as window) to map to capture tiles
   ;load tiles $80-FF and $00-5F by counting down to $80 from $5F 
   ld a, $60
   ld hl, $9800
@@ -199,6 +200,7 @@ BuildWindowTilemap_VH_Flipped: ;Fills the top-left part of tilemap (used as wind
     add hl, bc
     :cp a,$80
     jr nz, .innerloop
+ENDC
 
 BuildBGTilemap_TileIDCountup: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles in the same fashion as the window tilemap
   DEF TILEMAP0_CAPTURE1_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
@@ -227,7 +229,7 @@ BuildHorizontalHeader: ;Fills the UI with the icons for each setting
   ELSE
     ld hl, TILEMAP_UI_ORIGIN_H+3
   ENDC
-  ld de, UI_ICONS_ARRANGEMENT
+  ld de, UI_ICONS_ARRANGEMENT_H
 
   ld b, $2 ; number of lines (skips every other)
   : ld c, $5 ; number of tiles per line
@@ -249,7 +251,7 @@ BuildHorizontalHeader: ;Fills the UI with the icons for each setting
 
 ;This holds the horizontal parts of the UI. Each line is separated by an extra 3 zeros, and every other tileline is skipped (so it can hold data).
 ;Tile IDs are UI_ICONS_BASE_ID + index in the source image
-UI_ICONS_ARRANGEMENT:
+UI_ICONS_ARRANGEMENT_H:
   DEF UI_ICONS_BASE_ID EQU $60
   MACRO X
     db UI_ICONS_BASE_ID+\2
@@ -258,8 +260,23 @@ UI_ICONS_ARRANGEMENT:
 
 BuildUITilemapV:
   DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include the 'corner' at the top left.
-  ;After 4 tiles, skip 1C tiles to reach start of next tile line
-  ;Right now, this is a stub since we're not putting any icons into the vertical area yet
+  ;Fill UIBuffer_Vertical with blank tiles (can be replaced with memfill function)
+  ld hl,UIBuffer_Vertical
+  ld b,$38 ;size of the buffer
+  ld a,BLANK_TILE_ID
+  :ld [hli],a
+  dec b
+  jr nz,:-
+
+  ;Add the "free" icon (currently F)
+  DEF UI_ICONS_OFFSET_FREE EQU $0F
+  ld a, UI_ICONS_BASE_ID + UI_ICONS_OFFSET_FREE
+  ld [UIBuffer_Vertical], a
+
+  ;Initialize the variable for drawing the Vertical UI
+  ;TODO: move to a dedicated HRAM variables clear function
+  xor a
+  ldh [Vblank_VerticalUI_DrawLine], a
 
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt

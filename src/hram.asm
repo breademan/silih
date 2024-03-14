@@ -40,7 +40,6 @@ MENU_POSITION: db ;holds which menu item we're on (old4:new4)
 MENU_NYBBLE: db ; holds which nybble we've selected in the menu; this can be reused as a variable for other menus. (old4:new4)
 MENU_STATE_PREV: db ;holds the menu to return to from TAKE_CONFIRM and GALLERY -- SELECTED shouldn't need it
     ;DEF MENU_POSITION_PREV EQU $FFB2 ;these are both <16 values, we may be able to squeeze PREV and current values into the same memory location 4:4-style
-MENU_NYBBLE_PREV: db  ;^^^^^
-
-
+MENU_NYBBLE_PREV: db  ;^^^^^    
 VBlank_finished_flag: db
+Vblank_VerticalUI_DrawLine: db ;contains the line to draw in the vertical UI

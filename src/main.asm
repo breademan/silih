@@ -31,7 +31,7 @@ DEF JOYPAD_SELECT_MASK EQU $01<<2
 DEF JOYPAD_B_MASK EQU $01<<1
 DEF JOYPAD_A_MASK EQU $01<<0
 
-
+DEF BLANK_TILE_ID EQU $7F
 
 ;Set if the screen is flipped vertically
 DEF SCREEN_FLIP_V EQU 1
@@ -95,15 +95,16 @@ CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;Meta-option: 1byte
   CamOptEdgeMode: db
   
-;1 byte
-ContrastChangedFlag: db ;When contrast is changed, set this to 1
+  ;1 byte
+  ContrastChangedFlag: db ;When contrast is changed, set this to 1
                         ;May be wise to change this to a CamOptChangedFlags bitfield to check if CamRegs changed, Contrast, Dither Pattern, or Dither Lighting
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
+  UIBuffer_Vertical: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI
 
-  ;Cumulative $A0 bytes
-  ;$60 bytes remaining
+  ;Cumulative $D8 bytes
+  ;$28 bytes remaining
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -198,6 +199,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ldh [rLCDC],a ;+3c2b
 
   call DrawValueLines_DMAMethod 
+  call DrawVerticalUI ;TODO inline this
 
   ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
@@ -410,11 +412,6 @@ memcpy_1bpp:
     dec b ;since dec r16 doesn't set flags, we'd need extra instructions to check for sizes > $FF
     jp nz, memcpy_1bpp.loop
   ret
-  
-  DEF BLANK_TILE_ID EQU $7F
-
-  
-
 
 ;Converts the various camera opt WRAM variables into 5 register variables that can be applied to A001-A005 upon recapture.
 ;THESE should probably be WRAM vars, but ld a,[hli] (2c*5 + 3c ld r16,n16) is probably faster than ldh a, [n16] (3c2b). 
@@ -506,7 +503,6 @@ UpdateValsMap_WRAM:
 
 ;hl: location of byte to put into tilemap
 ;de location in tilemap to load the data
-;b tile index offset in tiledata for the tiles you want to display (UI_ICONS_BASE_ID)
 ;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
 ;assumes de doesn't cross a byte address boundary
 UpdateByteInTilemap:
@@ -1141,6 +1137,51 @@ StartHandover:
 
   jp $D000 ;run copy of init code with patches
 
+;Called by the Vblank ISR. Draws one of the 14 lines in the vertical UI
+
+DrawVerticalUI:
+  ld hl, UIBuffer_Vertical ;+3
+  ;calculate src address
+  ldh a,[Vblank_VerticalUI_DrawLine] ;+3
+  inc a ;+1
+  ;if the line to draw is greater than 13, reset it to 0.
+  cp a, 14 ;+2
+  jr nz, :+ ;+3/2
+  xor a ;+1
+  :ldh [Vblank_VerticalUI_DrawLine],a ;+3
+  ;Calculate src address
+  add a,a ;+1
+  add a,a ;+1
+  ld b, $00 ;+2
+  ld c, a ;offset bc = DrawLine * 4 ;+1
+  add hl,bc ;+2
+  ld d,h ;de = start of 4 source addresses: UIBuffer_Vertical + (rownum*4) ;+1
+  ld e,l ;+1
+
+  ;Calculate destination address
+  ld hl, TILEMAP_UI_ORIGIN_V ;+3
+  add a,a ;+1
+  add a,a ;+1
+  add a,a ;this last leftshift will overflow a; if there was a carry, increment b ;+1
+  jr nc,:+ ;+3
+  inc b ;+1
+  :ld c,a ;+1
+  add hl,bc ; hl = start of 4 dest addresses: TILEMAP_UI_ORIGIN_V + (rownum*32) ;+2
+
+  ;Write buffer to the line ;19c
+  ld a,[de] ;+2
+  ld [hli],a ;+2
+  inc e ;de(source buffer) does not cross byte boundaries ;+1
+  ld a,[de]
+  ld [hli],a
+  inc e
+  ld a,[de]
+  ld [hli],a
+  inc e
+  ld a,[de]
+  ld [hl],a
+
+ret
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 
