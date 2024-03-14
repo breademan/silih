@@ -282,6 +282,9 @@ MenuHandler_TakeConfirm:
   ENDC
   call UpdateByteInTilemap
 
+  ;Update the backup state vector upon successful save completion
+  call StateVector_Backup
+
   .save_cleanup
   ld h,$00
   ld [hl],h ; disable SRAM writes

@@ -101,7 +101,7 @@ CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
-  UIBuffer_Vertical: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI
+  UIBuffer_Vertical: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
 
   ;Cumulative $D8 bytes
   ;$28 bytes remaining

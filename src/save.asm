@@ -56,6 +56,7 @@ ret
 ; it decrements it by 1.
 ;arg c: value that is missing from the SV
 ;clobbers c, hl, a
+;must not clobber b due to being used in StateVector_FixAll
 StateVector_FixMissingVal:
     ;c: persistent storage for missing value
     ;hl: addr of current element in state vector
@@ -179,13 +180,25 @@ StateVector_CountUsedAndFree:
   call UpdateByteInTilemap
   ret
 
+  ;must not clobber b
 StateVector_Backup:
+  ;memcpy from the main State Vector in to the backup
+  ld hl, STATEVECTOR_START_ADDR
+  ld de, STATEVECTOR_START_ADDR_ECHO
+  ld c, CHECKSUM_MAGIC_END - STATEVECTOR_START_ADDR + 1 ;size including the MAGIC = CHECKSUM_MAGIC_END - STATEVECTOR_START_ADDR + 1
+  :ld a,[hli]
+  ld [de],a
+  inc e ; 8-bit since high bit of address is always B1
+  dec c
+  jr nz,:-
+
+
   ret
 
 
   ;Finds a free slot, populates it with USED, increments USED, decrements FREE, and returns the slot index of that free slot, plus 1.
-  ;Returns 0 if no free slots are found. However, this should not be called if FREE is zero
-  ;Assumes there are no missing display numbers
+  ;Returns 0 in c if no free slots are found. However, this should not be called if FREE is zero
+  ;Assumes there are no missing display numbers, as this should be done at init or on delete.
   ;clobber hl,a,c
 StateVector_FindAndFillFreeSlot:
   ld hl,STATEVECTOR_START_ADDR
@@ -211,5 +224,6 @@ StateVector_FindAndFillFreeSlot:
   inc hl ; can be made into an 8-bit inc if we can guarantee FREE and USED don't cross a byte boundary
   inc [hl] ;increment number of used slots
 
+  ;
 
   ret
