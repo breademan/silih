@@ -2,43 +2,7 @@
 
 INCLUDE "src/hardware.inc"             ; system defines
 
-INCLUDE "src/loader/loader.asm"
-
-INCLUDE "src/hram.asm"
-
-DEF UI_RAMBANK EQU 1
-DEF STOCK_RAMBANK EQU 2
-DEF TEST_CALLER_RAMBANK EQU 3
-DEF TEST_CALLEE_RAMBANK EQU 4
-DEF BACKUP_BANK EQU 5
-;DEF SAVE_RAMBANK EQU 2
-;DEF INIT_RAMBANK EQU 2
-DEF JOYPAD_DOWN EQU 7
-DEF JOYPAD_UP EQU 6
-DEF JOYPAD_LEFT EQU 5
-DEF JOYPAD_RIGHT EQU 4
-DEF JOYPAD_START EQU 3
-DEF JOYPAD_SELECT EQU 2
-DEF JOYPAD_B EQU 1
-DEF JOYPAD_A EQU 0
-
-DEF JOYPAD_DOWN_MASK EQU $01<<7
-DEF JOYPAD_UP_MASK EQU $01<<6
-DEF JOYPAD_LEFT_MASK EQU $01<<5
-DEF JOYPAD_RIGHT_MASK EQU $01<<4
-DEF JOYPAD_START_MASK EQU $01<<3
-DEF JOYPAD_SELECT_MASK EQU $01<<2
-DEF JOYPAD_B_MASK EQU $01<<1
-DEF JOYPAD_A_MASK EQU $01<<0
-
-DEF BLANK_TILE_ID EQU $7F
-
-;Set if the screen is flipped vertically
-DEF SCREEN_FLIP_V EQU 1
-;Set if the screen is flipped horizontally
-DEF SCREEN_FLIP_H EQU 1
-;Set if the captures are buffered in alternating VRAM banks
-DEF CAPTURE_BUFFERING EQU 0
+INCLUDE "src/general.inc"
 
 ;This section exists to ensure the addresses of WRAM tables are all aligned on 256bytes (h never changes)
 ;If we run out of space, make another $100-size section
@@ -52,7 +16,7 @@ OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are a
 ;Previously had to be placed in UI order for UpdateValsMap_WRAM, but it no longer cares.
 ;PrepareCameraOpts doesn't care about their in-memory order, so it should be safe to move them around otherwise.
 ;8 bytes
-CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
+CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptVH_RAM: db
   CamOptC_RAM: ;CamOptC_RAM is stored in little-endian order, inconsistent with the CAM registers, but easily updated by modify_nybble
     CamOptC_RAM_L: db 
@@ -89,8 +53,8 @@ CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   wHDMA4: db
   
   ;Save Slot variables: 2 bytes
-  SAVE_SLOTS_FREE: db
-  SAVE_SLOTS_USED: db
+  SAVE_SLOTS_FREE:: db
+  SAVE_SLOTS_USED:: db
 
   ;Meta-option: 1byte
   CamOptEdgeMode: db
@@ -101,7 +65,7 @@ CamOptN_RAM: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
-  UIBuffer_Vertical: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
+  UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
 
   ;Cumulative $D8 bytes
   ;$28 bytes remaining
@@ -505,7 +469,7 @@ UpdateValsMap_WRAM:
 ;de location in tilemap to load the data
 ;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
 ;assumes de doesn't cross a byte address boundary
-UpdateByteInTilemap:
+UpdateByteInTilemap::
   ;17 cycles + call/ret
   ld a, [hl] ;display high nybble +2c1b
   swap a ;+2c2b
@@ -675,7 +639,7 @@ RestartHDMATransfer:
  
   ;The callee must add sp,-(6+(2*num_POPs)) in order to return to the top of the stack.
   ;after it RETs and the trampoline switches back to the caller WRAM bank, the caller must also add 2*num_POPs to the stack to clean up.
-Trampoline_hl_e:
+Trampoline_hl_e::
   ldh a,[rSVBK]
   push af ;push current bank
   ld a,e
@@ -791,7 +755,7 @@ ArrangeThresholdsInPattern:
 ;fill dither table
 ;reads the contrast + light/dark variable to select the dither pattern, then fills the table
 ;args: null
-PrepareDitherPattern:
+PrepareDitherPattern::
   ;add the dither table number to DITHER_BASE_TABLE (the table start addresses are all in the same byte, though the last table actually goes outside)
   ld hl, DITHER_BASE_TABLE ;+3
   ld a, [CamOptDitherTable] ;+4
@@ -1051,7 +1015,7 @@ checker_payload_end:
 ;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
 DEF ROM_MEMCLR_ADDR EQU $043f
 ;Due to RAMbank switching immediately before handover, this must either be located in unbanked RAM, or use a trampoline at the end
-StartHandover:
+StartHandover::
   di;Vblank ISR might interfere with our code -- disable interrupts, though we will disable the screen, so this should not be a problem.
   ;Load HRAM stub into HRAM
   
@@ -1219,23 +1183,23 @@ Viewfinder_UI_Tiles:
 ; SelectedNumBitsTable: ;Number of bits we care about in each variable.
 ; db $01, $02, $10, $06, $05
 ; db $04, $03, $04, $02, $00
-SelectedMaxNybblesTable: ;Max nybble position each entry in the menu has -- manually set based off of Ceiling(SelectedNumBitsTable>>2)-1
+SelectedMaxNybblesTable:: ;Max nybble position each entry in the menu has -- manually set based off of Ceiling(SelectedNumBitsTable>>2)-1
   MACRO X
     db \3
   ENDM
 INCLUDE "src/ui_elements.inc"
-SelectedMinTable:
+SelectedMinTable::
   MACRO X
     db \4
   ENDM
 INCLUDE "src/ui_elements.inc"
-SelectedMaxTable:
+SelectedMaxTable::
   MACRO X
     db \5
   ENDM
 INCLUDE "src/ui_elements.inc"
 ;E (first entry of 2nd row) is technically 4 bits, but setting E3 does edge extraction, we'd have to set Z to 0 for that, and I can't imagine anyone would use it.
-SelectedAddrTable: ;holds the addresses of the WRAM variables for each camera register
+SelectedAddrTable:: ;holds the addresses of the WRAM variables for each camera register
   MACRO X
     dw \1
   ENDM
@@ -1244,7 +1208,7 @@ INCLUDE "src/ui_elements.inc"
 ;dw CamOptE_RAM, CamOptV_RAM, CamOptContrast, CamOptDitherTable, CamOptDitherPattern
 
 ;Must not crrss byte-address boundary
-EdgeControlModes:
+EdgeControlModes::
   ;An entry is stored as 00000:VH1:VH0:N.
   db %00000000, \; Positive image N VH = 0 00
   %00000010, \; Horizontal Enhancement N VH = 0 01
@@ -1275,15 +1239,12 @@ SECTION "OAM Work Area SECTION", WRAM0[$CE00]
   ;OAM_Work_Area_Storage:
   ;LOAD "OAM Work Area LOAD", WRAM0[$CE00]
   OAM_Work_Area:
-  DEF OAM_USED_AREA EQU 1 ; Length of the used OAM area in 4-byte entries
-  DEF OAM_USED_BYTES EQU OAM_USED_AREA*4
-  DEF Sprite0_Cursor EQU OAM_Work_Area
   ;I should probably use a struct for this instead of manually defining every field of every sprite
   ;Since I don't use many sprites it doesn't matter _too much_
-  DEF Sprite0_CursorY EQU Sprite0_Cursor
-  DEF Sprite0_CursorX EQU Sprite0_Cursor+1
-  DEF Sprite0_CursorTileIndex EQU Sprite0_Cursor+2
-  DEF Sprite0_CursorAttr EQU Sprite0_Cursor+3
+  Sprite0_CursorY:: db
+  Sprite0_CursorX:: db
+  Sprite0_CursorTileIndex:: db
+  Sprite0_CursorAttr:: db
 
   DS $A0;, $00 ;$A0 bytes allocated to store OAM -- we may not need all 40 objects, so we can shrink this to 4*(number of objects) if we really need space.
 ;ENDL
@@ -1291,10 +1252,6 @@ SECTION "OAM Work Area SECTION", WRAM0[$CE00]
 SECTION "Stack Area",WRAM0[$CEE0]
   Stack_Area:
   DS $100
-    
-  INCLUDE "src/ui.asm"
-  INCLUDE "src/trampoline_test_caller.asm"
-  INCLUDE "src/trampoline_test_callee.asm"
 
   DEF DITHER_BASE_ROMBANK EQU $0A ;base of light
   DEF DITHER_BASE_TABLE EQU $7C20

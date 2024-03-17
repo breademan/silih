@@ -181,7 +181,7 @@ StateVector_CountUsedAndFree:
   ret
 
   ;must not clobber b
-StateVector_Backup:
+StateVector_Backup::
   ;memcpy from the main State Vector in to the backup
   ld hl, STATEVECTOR_START_ADDR
   ld de, STATEVECTOR_START_ADDR_ECHO
@@ -200,7 +200,7 @@ StateVector_Backup:
   ;Returns 0 in c if no free slots are found. However, this should not be called if FREE is zero
   ;Assumes there are no missing display numbers, as this should be done at init or on delete.
   ;clobber hl,a,c
-StateVector_FindAndFillFreeSlot:
+StateVector_FindAndFillFreeSlot::
   ld hl,STATEVECTOR_START_ADDR
   :ld a,[hli]
   inc a

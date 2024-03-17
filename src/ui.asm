@@ -1,3 +1,7 @@
+INCLUDE "src/hardware.inc"
+
+INCLUDE "src/general.inc"
+
 SECTION "Payload UI Data SECTION",ROM0[$1000 + ($1000*UI_RAMBANK)]
 UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
@@ -318,7 +322,7 @@ jp HandleInputDone
 
 ;----------------------Functions---------------------------
 ; These are called when entering and returning to menu states
-InitMenuState_CameraOpts:
+InitMenuState_CameraOpts::
   xor a
   ldh [MENU_STATE], a
   ldh [MENU_POSITION], a

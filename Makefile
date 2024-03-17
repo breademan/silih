@@ -4,7 +4,7 @@
 AS := $(RGBDS_PATH)rgbasm
 ASFLAGS := -i inc/ -i data/ -o
 LD := $(RGBDS_PATH)rgblink
-LDFLAGS := -x -n bin/main.sym -o 
+LDFLAGS := -x -n bin/silih.sym -o 
 FX := $(RGBDS_PATH)rgbfix
 FXFLAGS := -c -p 0 -r 0 -t CGB_EXAMPLE -v
 
@@ -15,15 +15,19 @@ cgb_name := main.asm
 cgb_src := src/$(cgb_name)
 cgb_rom := bin/$(cgb_name:.asm=.gbc)
 
-all:	$(cgb_rom)
+all:	bin/silih.gbc
 
-%.gbc: %.o
-		$(LD) $(LDFLAGS) $@ $<
-		$(FX) $(FXFLAGS) $@
+bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o
+	$(LD) $(LDFLAGS) $@ $^
+	$(FX) $(FXFLAGS) $@
 		
+bin/loader.o: src/loader/loader.asm
+	$(AS) $(ASFLAGS) $@ src/loader/loader.asm
+
 #This should have a prerequisite for all .1bpp asset files, but doesn't -- right now we're just hard-coding them
 bin/%.o: src/%.asm assets/viewfinderUI.1bpp
-		$(AS) $(ASFLAGS) $@ $<
+	$(AS) $(ASFLAGS) $@ $<
+
 
 clean:
 		rm -f bin/*.o
