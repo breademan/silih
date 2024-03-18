@@ -247,23 +247,22 @@ MenuHandler_TakeConfirm:
     ld h, HIGH(rRAMB) ;2c2b
     ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
     ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
-    call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in c
-    ld a, c
+    call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
     and a
     jp z, .save_cleanup ;skip saving if FindAndFillFreeSlot returns 0
 
-    dec c
+    dec a
     ;the bank we want to switch to, held in c, should be 1 + (slot index>>1).
     ;Copy image data to the correct slot
-    bit 0, c
+    bit 0, a
     ld e, $FF ;if slot index is even
     jr z,:+
     ld e, $0F     ;if slot index is odd, set the value to add/sub from HIGH(src/dest pointer) to $0F. Otherwise, use -1 (FF)
   :
   ;shift right and add 1 to get the bank number
-  srl c
-  inc c
-
+  srl a
+  inc a
+  ld c,a ;the transfer function takes the SRAM bank number in c
   call SaveCaptureDataFromSRAM0
 
 
@@ -285,9 +284,6 @@ MenuHandler_TakeConfirm:
   ld de, UIBuffer_Vertical+2
   ENDC
   call UpdateByteInTilemap
-
-  ;Update the backup state vector upon successful save completion
-  call StateVector_Backup
 
   .save_cleanup
   ld h,$00

@@ -196,10 +196,10 @@ StateVector_Backup::
   ret
 
 
-  ;Finds a free slot, populates it with USED, increments USED, decrements FREE, and returns the slot index of that free slot, plus 1.
-  ;Returns 0 in c if no free slots are found. However, this should not be called if FREE is zero
+  ;Finds a free slot, populates it with USED, increments USED, decrements FREE, and returns the slot index of that free slot, plus 1 in a.
+  ;Returns 0 in a if no free slots are found. However, this should not be called if FREE is zero
   ;Assumes there are no missing display numbers, as this should be done at init or on delete.
-  ;clobber hl,a,c
+  ;clobber hl,a,c,de
 StateVector_FindAndFillFreeSlot::
   ld hl,STATEVECTOR_START_ADDR
   :ld a,[hli]
@@ -213,17 +213,18 @@ StateVector_FindAndFillFreeSlot::
   .found
   ld a, l
   sub a,LOW(STATEVECTOR_START_ADDR)
-  ld c, a ; c = bank number to fill with data
+  push af ; bank number to fill with data
 
   dec l ;since we used an hli, we want to decrement hl to get back to the index we're looking at
   ld a, [SAVE_SLOTS_USED]
   call StateVector_WriteByte
+  ;Update the backup state vector upon successful save completion
+  call StateVector_Backup
   
   ld hl, SAVE_SLOTS_FREE ;assumes FREE and USED variables are contiguous
   dec [hl] ;decrement number of free slots
   inc hl ; can be made into an 8-bit inc if we can guarantee FREE and USED don't cross a byte boundary
   inc [hl] ;increment number of used slots
 
-  ;
-
+  pop af ;return the bank number in a
   ret
