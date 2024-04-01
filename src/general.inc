@@ -32,8 +32,6 @@ DEF BLANK_TILE_ID EQU $7F
 DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally
 DEF SCREEN_FLIP_H EQU 1
-;Set if the captures are buffered in alternating VRAM banks
-DEF CAPTURE_BUFFERING EQU 0
 
 DEF MENU_STATE_CAMERA_OPTS EQU 0
 DEF MENU_STATE_DITHER_OPTS EQU 1

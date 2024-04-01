@@ -25,9 +25,8 @@ bin/loader.o: src/loader/loader.asm
 	$(AS) $(ASFLAGS) $@ src/loader/loader.asm
 
 #This should have a prerequisite for all .1bpp asset files, but doesn't -- right now we're just hard-coding them
-bin/%.o: src/%.asm assets/viewfinderUI.1bpp
+bin/%.o: src/%.asm assets/viewfinderUI.1bpp assets/UserButtons.1bpp assets/actions.1bpp assets/objects0.1bpp
 	$(AS) $(ASFLAGS) $@ $<
-
 
 clean:
 		rm -f bin/*.o

@@ -5,14 +5,20 @@ INCLUDE "src/hardware.inc"             ; system defines
 INCLUDE "src/general.inc"
 
 ;This section exists to ensure the addresses of WRAM tables are all aligned on 256bytes (h never changes)
-;If we run out of space, make another $100-size section
+;If we run out of space, make another $100-size section before it
 SECTION "WRAM Variables Area 0 SECTION", WRAM0[$CD00]
 WRAM_Var_Area0:
+UNION
 ;64 bytes
-OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are aligned on 256 bytes
+OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are aligned on 256 bytes. Since we can only see the first 20 bytes of each 32-byte line, we can use the last 12 bytes for storage
 ;A line buffer size of 64 means two lines of data. We may want to split this into two labels so we can work with the lines separately, but we may also just be able to work with it contiguously.
 ;OptionLinesBuffer is HDMA'd, meaning it must be aligned on 16bytes
-
+NEXTU
+DS 20
+;Insert variables here, 12 bytes
+DS 20
+;Insert more variables here,12 bytes
+ENDU
 ;Previously had to be placed in UI order for UpdateValsMap_WRAM, but it no longer cares.
 ;PrepareCameraOpts doesn't care about their in-memory order, so it should be safe to move them around otherwise.
 ;8 bytes
@@ -25,11 +31,11 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptG_RAM: db
   CamOptE_RAM: db
   CamOptV_RAM: db
-  ;Non-CAM-register manual config options: 3 bytes
+  ;Non-CAM-register manual config options: 4 bytes
   CamOptContrast: db ; 0-F
   CamOptDitherTable: db ;selects whether to use light or dark dither table. 0=light (sramA:7c20), 1=dark (sramA:7c60)
   CamOptDitherPattern: db
-  
+  CamOptEdgeMode: db ;Meta-option that modifies NVH
   ;These variables are downstream of the above individual CamOpt variables. UpdateCameraOpts uses these contiguously and with CamOptDither_RAM, so they must be contiguous
   ; 5 + 48 bytes
   CamOptA001_RAM: db
@@ -55,9 +61,6 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;Save Slot variables: 2 bytes
   SAVE_SLOTS_FREE:: db
   SAVE_SLOTS_USED:: db
-
-  ;Meta-option: 1byte
-  CamOptEdgeMode: db
   
   ;1 byte
   ContrastChangedFlag: db ;When contrast is changed, set this to 1
@@ -132,9 +135,9 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   pop bc ;the top of the stack is the address of the ROM's VBlank ISR. Since we don't want to return to it, we pop it off the stack and don't use it.
   
   ;cursor transparency effect: alternate cursor sprite blank(Vbank1)->white(Vbank0) every other frame. The sprite has the same ID, just different banks. 
-  ld a, [OAM_Work_Area+3] ;+4c3b
-  xor a, %00001000 ;2c2b
-  ld [OAM_Work_Area+3], a ;+4c3b
+  ld a, [OAM_Work_Area+2] ;+4c3b
+  xor a, %00000001 ;2c2b
+  ld [OAM_Work_Area+2], a ;+4c3b
 
   ;If we have few objects, instead of transferring the entire OAM, we can just modify the position (2bytes) or entirety (4bytes) of a small number of hardcoded ones.
   .OAM_Transfer:
@@ -163,7 +166,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ldh [rLCDC],a ;+3c2b
 
   call DrawValueLines_DMAMethod 
-  call DrawVerticalUI ;TODO inline this
+  call DrawSidebar ;TODO inline this
 
   ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
@@ -196,16 +199,6 @@ CapturingHandler:
   ;Switch SRAM bank to first bank, which contains image data (we need to remember not to switch away from this while transferring)
   ;viewfinder state = capturing means you should wait for it to finish before switching SRAM or VRAM banks.
   ;At the moment, the only non-init SRAM switches are saving a capture, and that waits until the capture is complete. 
-  .switchVRAMBank
-  ; Once transfer is finished and new capture is started, switch the CPU-accessible VRAM Bank
-  ;Whichever VRAM bank we're currently in, switch. 
-  ;switchVRAMBank can be done anytime before reading in WRAM, ideally right before waiting for capture 
-      ;However, doing so will increase the between-capture frame time by a few clock cycles.
-  IF CAPTURE_BUFFERING
-  ldh a, [rVBK]
-  xor a, $01 ;2b2c TODO may be replaced by cpl to save 1b1c, since only bit 0 is used.
-  ldh [rVBK], a
-  ENDC
 
 .start_hdma_transfer
   xor a
@@ -306,15 +299,6 @@ DMAHandler:
   jp ViewfinderChecks
 
     .transfer_complete
-
-    .toggleWindow
-    ;Change the visibility of the window by swapping bit 5 of LCDC -- we want its value to be whatever old VRAM bank value was
-    ;toggleWindow should be done after a VRAM transfer is complete, even if new capture shouldn't be started, so the new capture is displayed.
-    IF CAPTURE_BUFFERING
-    ld a, [wLCDC]
-    xor a, %00100000
-    ld [wLCDC], a
-    ENDC
 
     ;If we're not going to restart a capture, change the viewfinder state to VF_STATE_PAUSED
     ldh a,[MENU_STATE]
@@ -1103,16 +1087,16 @@ StartHandover::
 
 ;Called by the Vblank ISR. Draws one of the 14 lines in the vertical UI
 
-DrawVerticalUI:
+DrawSidebar:
   ld hl, UIBuffer_Vertical ;+3
   ;calculate src address
-  ldh a,[Vblank_VerticalUI_DrawLine] ;+3
+  ldh a,[Vblank_Sidebar_DrawLine] ;+3
   inc a ;+1
   ;if the line to draw is greater than 13, reset it to 0.
   cp a, 14 ;+2
   jr nz, :+ ;+3/2
   xor a ;+1
-  :ldh [Vblank_VerticalUI_DrawLine],a ;+3
+  :ldh [Vblank_Sidebar_DrawLine],a ;+3
   ;Calculate src address
   add a,a ;+1
   add a,a ;+1
@@ -1153,7 +1137,12 @@ ret
     ;-------------------------------------------DATA-------------------------------
 Viewfinder_UI_Tiles:
     incbin "assets/viewfinderUI.1bpp", 0,256
-
+gfxButtons_storage:
+    incbin "assets/UserButtons.1bpp",0,128
+gfxActions_storage:
+    incbin "assets/actions.1bpp",0,128
+gfxObjects0_storage:
+    incbin "assets/objects0.1bpp",0,128
 ;Constant values space
 ; ;define the SelectedOptionsEntry struct
 ; RSRESET

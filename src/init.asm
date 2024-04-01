@@ -14,23 +14,7 @@ Blank_Display:
   ld [wLCDC], a
   ldh [rLCDC], a
 
-Reset_vram:
-  ld  a,$1
-  ldh  [rVBK],a
-  xor a
-  ld  hl,$8000
-.reset_vram1_loop ;resets VRAM bank 1
-  ld  [hl+],a
-  bit 5,h
-  jr  z,.reset_vram1_loop
-  ldh  [rVBK],a
-  ld  hl,$8000
-  cpl    ;Modify to fill with $FF instead of $00 -- this should make all the unused UI tiles $FF
-.reset_vram0_loop ;Resets VRAM bank 0
-  ld  [hl+],a
-  bit 5,h
-  jr  z,.reset_vram0_loop
-  .blank_oam
+BlankOAM:
   xor a
   ld  hl,$FE00
   ld  c,$A0
@@ -99,14 +83,16 @@ jr .end
     
 ;Initializes the cursor in the OAM work area. If more objects are initialized, they should be initialized here.
 OAM_Cursor_TileLoad:
-  ld a, $10 ;Y-Position 16
+  DEF CURSOR_TILE_ID EQU 3 
+  ;Cursor currently points to tile ID 1
+  ld a, $10 ;Y-Position 16 -- TODO: Y-LOCATION is zero on init for some reason if CURSOR_TILE_ID
   ld hl, OAM_Work_Area
   ld [hli], a
   ld a, $8 ;X-Position 8
   ld [hli], a
-  xor a ; Tile ID 0
+  ld a,CURSOR_TILE_ID
   ld [hli], a
-  ld a, %01100001;attributes:  
+  ld a, %00001001 | (SCREEN_FLIP_V<<6) | (SCREEN_FLIP_H<<5) ;attributes  
   ld [hl], a
 
 
@@ -138,7 +124,6 @@ InitInput:
 	ld [GetInputPtr+2], a ; 3b4c high bit
 
 ;Changes tile attributes in the VRAM bank 1 attribute map.
-;All tiles flip horizontally and vertically (for an upside-down GBA SP)
 ;Also fills the tilemaps to point to the correct VRAM bank, making the area that we use as the window (the top) use tiles from VRAM bank 1 
 InitTilemapAttributes:
   ld a, $01
@@ -150,23 +135,57 @@ InitTilemapAttributes:
   ld a, INIT_TILEMAP_ATTRS | %00001000; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 
-  ;Top points to VBank1, fills until $99FF ($99C0-$99FF will be overwritten later), used for the Window area's buffered captures
+  ;Top points to VBank1, fills until $9BFF ($99C0-$9BFF will be overwritten later), used for the Window area's buffered captures
   .FillWithBank1:
     ld [hli], a
-    bit 1, h
-    jr z, .FillWithBank1
-  ;Now, fill starting at 99C0
-  ld a, INIT_TILEMAP_ATTRS
-  ld hl, $99C0
-  .FillWithBank0: ;Everything under the 12th tileline is filled with bank 0 tiles
-    ld [hli], a
     bit 2, h
-    jr z, .FillWithBank0
+    jr z, .FillWithBank1
+  ;Now, fill starting at 9A44
+  ld a, INIT_TILEMAP_ATTRS
+  ld hl, $9A44
+  ld bc, $0010
+  .fillCaptureAreaWithBank0: ;add $10 if high nybble of l is odd (bit 4 is set) and if the low nybble has 4 (bit 2)
+  ;TODO a basic counter using a register would probably be more efficient and flexible
+    ld [hli], a
+    bit 4, l
+    jr z,:+
+    bit 2, l
+    jr z,:+
+    add hl, bc ;add $10 to hl
+    :bit 2, h
+    jr z, .fillCaptureAreaWithBank0
 
-  LoadUITiles:
-  ;Switch back to VRAM Bank 0 to mess with tilemap
-  xor a 
-  ldh [rVBK], a
+LoadButtonTiles:
+  DEF BUTTON_TILES_ORIGIN_ADDR EQU $9400
+  DEF BUTTON_TILES_ORIGIN_TILENUM EQU $60
+  DEF PROMPT_NO_DPAD EQU BUTTON_TILES_ORIGIN_TILENUM
+  DEF PROMPT_RIGHT EQU BUTTON_TILES_ORIGIN_TILENUM + 1
+  DEF PROMPT_DOWN EQU BUTTON_TILES_ORIGIN_TILENUM + 2
+  DEF PROMPT_LEFT EQU BUTTON_TILES_ORIGIN_TILENUM + 3
+  DEF PROMPT_UP EQU BUTTON_TILES_ORIGIN_TILENUM + 4
+  DEF PROMPT_NO_A EQU BUTTON_TILES_ORIGIN_TILENUM + 5
+  DEF PROMPT_A EQU BUTTON_TILES_ORIGIN_TILENUM + 6
+  DEF PROMPT_NO_B EQU BUTTON_TILES_ORIGIN_TILENUM + 7
+  DEF PROMPT_B EQU BUTTON_TILES_ORIGIN_TILENUM + 8
+  DEF PROMPT_NO_STARTSELECT EQU BUTTON_TILES_ORIGIN_TILENUM + 12
+  DEF PROMPT_SELECT EQU BUTTON_TILES_ORIGIN_TILENUM + 13
+  DEF PROMPT_START EQU BUTTON_TILES_ORIGIN_TILENUM + 14
+
+  ;At the end of InitTilemapAttributes, VRAM bank is 1, so we need not switch.
+  ld hl, gfxButtons_storage
+  ld de, BUTTON_TILES_ORIGIN_ADDR
+  ld b, $7F
+  call memcpy_1bpp
+
+LoadActionTiles:
+  DEF ACTION_TILES_ORIGIN_ADDR EQU $9200
+  ;At the end of InitTilemapAttributes, VRAM bank is 1, so we need not switch.
+  ld hl, gfxActions_storage
+  ld de, ACTION_TILES_ORIGIN_ADDR
+  ld b, $7F
+  call memcpy_1bpp
+
+LoadUITiles:
   ;Unpacks the 1bpp UI tiles into the appropriate area of VRAM (last 32 tiles of bank 0)
   DEF UI_TILES_ORIGIN EQU $9600
   ld hl, Viewfinder_UI_Tiles
@@ -174,35 +193,19 @@ InitTilemapAttributes:
   ld b, $FF
   call memcpy_1bpp
 
-;Loads the section of tilemap that we can see with blank tiles
-ClearTileMap0:
-ld hl, TILEMAP_UI_ORIGIN_H ;fill from 99C0 to 9BFF -- a size of $240 (576) -- possible with an 8-bit counter if we fill 4 tiles at a time
-ld a, BLANK_TILE_ID
-ld b,$90
-:ld [hli],a
-ld [hli],a
-ld [hli],a
-ld [hli],a
-dec b
-jr nz,:-
+LoadObject0Tiles:
+  ;Unpacks the 1bpp UI tiles into the appropriate area of VRAM (last 32 tiles of bank 0)
+  DEF OBJ_TILES_ORIGIN EQU $8000
+  ld hl, gfxObjects0_storage
+  ld de, OBJ_TILES_ORIGIN
+  ld b, $FF
+  call memcpy_1bpp
 
-IF CAPTURE_BUFFERING
-BuildWindowTilemap: ;Fills the top-left part of tilemap (used as window) to map to capture tiles
-  ;load tiles $80-FF and $00-5F by counting down to $80 from $5F 
-  ld a, $60
-  ld hl, $9800
-  ld bc, $10
-  .innerloop
-    dec a
-    ld [hli], a
-    bit 4, l ;every 16 tiles, skip the next 16 tiles (since they're out-of-view)
-    jr z, :+
-    add hl, bc
-    :cp a,$80
-    jr nz, .innerloop
-ENDC
+  ;Switch back to VRAM Bank 0 to mess with tilemap
+  xor a 
+  ldh [rVBK], a
 
-BuildBGTilemap_TileIDCountup: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles in the same fashion as the window tilemap
+BuildViewfinderTilemap: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles by counting up the tile ID.
   DEF TILEMAP0_CAPTURE1_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
   ld a, $7F ;this can be used as the counter within the row, too. If low nybble is (row-backwards:0, row-forwards:F),  we just wrote to the end of line
   ld hl, TILEMAP0_CAPTURE1_ORIGIN + ($0F*SCREEN_FLIP_H) + ($20*13*SCREEN_FLIP_V);Depending on the VHflip, the original tilemap index will change (noflip =+0. Hflip = +$0F. Vflip = +13 lines (+32*13))
@@ -243,7 +246,7 @@ BuildHorizontalHeader: ;Fills the UI with the icons for each setting
   dec c
   jr nz, :- ;Line finished check
   dec b
-  jr z, BuildUITilemapV ;if b=0, you've finished
+  jr z, BuildSidebar ;if b=0, you've finished
   ld bc, $2C
   add hl, bc  ;Go to next line
   ld b, 1
@@ -258,7 +261,7 @@ UI_ICONS_ARRANGEMENT_H:
   ENDM
   INCLUDE "src/ui_elements.inc"
 
-BuildUITilemapV:
+BuildSidebar:
   DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include the 'corner' at the top left.
   ;Fill UIBuffer_Vertical with blank tiles (can be replaced with memfill function)
   ld hl,UIBuffer_Vertical
@@ -276,7 +279,7 @@ BuildUITilemapV:
   ;Initialize the variable for drawing the Vertical UI
   ;TODO: move to a dedicated HRAM variables clear function
   xor a
-  ldh [Vblank_VerticalUI_DrawLine], a
+  ldh [Vblank_Sidebar_DrawLine], a
 
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt
@@ -293,11 +296,7 @@ Init_LCD:
   ldh [rWX], a
 
   ; Turn the LCD on, Window off to be different from the current VRAM bank
-  IF CAPTURE_BUFFERING
-  ld a, LCDCF_ON | LCDCF_BGON | LCDCF_WINON | LCDCF_OBJON
-  ELSE
   ld a, LCDCF_ON | LCDCF_BGON | LCDCF_WINOFF | LCDCF_OBJON
-  ENDC
   ld [wLCDC],a
   ldh [rLCDC], a
 
@@ -413,9 +412,5 @@ ldh [rSVBK],a
 call Trampoline_test_caller ;Set a watchpoint here and see if $DEADBEEF ends up in hlbc
 
 ;Switch VRAM bank to 1 so that it alternates in-sync with the window
-IF CAPTURE_BUFFERING
-ld a, $1 
-ELSE
 xor a ; if we're doing no-tear, then VBK should be 0 at all times
-ENDC
 ldh [rVBK], a
