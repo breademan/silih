@@ -28,6 +28,14 @@ DEF OAM_USED_BYTES EQU OAM_USED_AREA*4
 
 DEF BLANK_TILE_ID EQU $7F
 
+DEF CAPTURE_TILEDATA_START EQU $8800     ;Start at $8800 so the entire area is contiguous so DMA transfers can work more simply.
+DEF CAPTURE_TILEDATA_SIZE EQU $0E00
+DEF CAPTURE_TILEDATA_END EQU CAPTURE_TILEDATA_START + CAPTURE_TILEDATA_SIZE - 1
+
+DEF TILEMAP0_CAPTURE_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
+DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include the 'corner' at the top left.
+DEF TILEMAP_UI_ORIGIN_H EQU $99C0 ;$9800 + 14 rows -- this includes the 'edge' at the top left
+
 ;Set if the screen is flipped vertically
 DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally

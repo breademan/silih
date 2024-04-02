@@ -221,9 +221,6 @@ CapturingHandler:
   ld [hli],a
   ldh [rHDMA2], a
 
-  DEF CAPTURE_TILEDATA_START EQU $8800     ;Start at $8800 so the entire area is contiguous so DMA transfers can work more simply.
-  DEF CAPTURE_TILEDATA_SIZE EQU $0E00
-  DEF CAPTURE_TILEDATA_END EQU CAPTURE_TILEDATA_START + CAPTURE_TILEDATA_SIZE - 1
     ;Set HDMI dest to start of tile data
   ld a, HIGH(CAPTURE_TILEDATA_START)
   ld [hli],a

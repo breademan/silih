@@ -205,10 +205,22 @@ LoadObject0Tiles:
   xor a 
   ldh [rVBK], a
 
+;Fills the area below the horizontal UI with blank tiles. Since it takes a few frames for the SidebarBuffer to be drawn, it will appear glitched on startup if this is not run.
+ClearSidebarTilemap:
+  ;can be replaced by a memfill (size >$100 or until-dest form)
+  ;For simplicity, this will run before BuildViewfinderTilemap in order to fill all bytes instead of skipping every 4
+  ld hl,TILEMAP_UI_ORIGIN_V ;9A40-9BFF -- fill with blank tiles until H=9C
+  ld b, BLANK_TILE_ID
+  :ld a,b
+  ld [hli],a
+  ld a,h
+  cp a,$9C
+  jp nz,:-
+
+
 BuildViewfinderTilemap: ;Maps the bottom-left tilemap area (+4 tiles on the left) to captured tiles by counting up the tile ID.
-  DEF TILEMAP0_CAPTURE1_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
   ld a, $7F ;this can be used as the counter within the row, too. If low nybble is (row-backwards:0, row-forwards:F),  we just wrote to the end of line
-  ld hl, TILEMAP0_CAPTURE1_ORIGIN + ($0F*SCREEN_FLIP_H) + ($20*13*SCREEN_FLIP_V);Depending on the VHflip, the original tilemap index will change (noflip =+0. Hflip = +$0F. Vflip = +13 lines (+32*13))
+  ld hl, TILEMAP0_CAPTURE_ORIGIN + ($0F*SCREEN_FLIP_H) + ($20*13*SCREEN_FLIP_V);Depending on the VHflip, the original tilemap index will change (noflip =+0. Hflip = +$0F. Vflip = +13 lines (+32*13))
   ld bc, $0010+($20*SCREEN_FLIP_H) - ($40*SCREEN_FLIP_V) ;The value to add to the tilemap index at the start/end of each line -- may be 2's complement negative
   ld e, $10 ; e = inner counter (x-offset)
   .loop
@@ -226,7 +238,6 @@ BuildViewfinderTilemap: ;Maps the bottom-left tilemap area (+4 tiles on the left
     jr nz, .loop
 
 BuildHorizontalHeader: ;Fills the UI with the icons for each setting
-  DEF TILEMAP_UI_ORIGIN_H EQU $99C0 ;$9800 + 14 rows -- this includes the 'edge' at the top left
   IF SCREEN_FLIP_H
     ld hl, TILEMAP_UI_ORIGIN_H
   ELSE
@@ -262,7 +273,6 @@ UI_ICONS_ARRANGEMENT_H:
   INCLUDE "src/ui_elements.inc"
 
 BuildSidebar:
-  DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include the 'corner' at the top left.
   ;Fill UIBuffer_Vertical with blank tiles (can be replaced with memfill function)
   ld hl,UIBuffer_Vertical
   ld b,$38 ;size of the buffer
@@ -281,6 +291,16 @@ BuildSidebar:
   xor a
   ldh [Vblank_Sidebar_DrawLine], a
 
+ClearCaptureTiledata: ;The tiledata for the capture should be blank for the first frames, while the camera is capturing.
+;Clear the tiledata in address 0:8800-0:95FF (clear until dest-high byte=$96)
+ld hl,CAPTURE_TILEDATA_START
+ld b, HIGH(CAPTURE_TILEDATA_END+1)
+:xor a
+cpl
+ld [hli],a
+ld a,h
+cp a,b
+jp nz,:- ;if h != $96, loop
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt
 Init_LCD:
