@@ -18,6 +18,42 @@ ChangeOptionHandler_table:
   ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
     .end
 
+SidebarArrangementViewfinder:
+  db (SidebarArrangementViewfinder.end - SidebarArrangementViewfinder) - 1 ;size of this data structure -- this should really be a struct
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_MODIFY, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Modify
+  db PROMPT_NO_DPAD, PROMPT_NO_B, PROMPT_A, PROMPT_NO_STARTSELECT;A button
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Take photo
+  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_HANDOVER, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Cart Handover
+  db PROMPT_DOWN, PROMPT_NO_B, PROMPT_NO_A, PROMPT_SELECT;Down + Select
+  .end
+  ASSERT SidebarArrangementViewfinder.end - SidebarArrangementViewfinder <= 52, "SidebarArrangementViewfinder is too large"
+
+SidebarArrangementSelected:
+  db (SidebarArrangementSelected.end - SidebarArrangementSelected) - 1 ;size of this data structure -- this should really be a struct
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Confirm
+  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+  .end
+ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
+
+SidebarArrangementTakeConfirm:
+  db (SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm) - 1 ;size of this data structure -- this should really be a struct
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Confirm
+  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Cancel
+  db PROMPT_NO_DPAD, PROMPT_NO_B, PROMPT_A, PROMPT_NO_STARTSELECT;A button
+  .end
+
+  ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
+
+
 HandleInput::
     ldh a, [MENU_STATE]
     add a,a     ;each jump table entry is 2 bytes long, so multiply MENU_STATE by 2
@@ -318,11 +354,30 @@ jp HandleInputDone
 
 ;----------------------Functions---------------------------
 ; These are called when entering and returning to menu states
+
+;@param hl: address of actions/prompts table used to fill sidebar
+PrepareSidebar:
+	ld a,[hli] ; size to memcpy, hl now points to start of data 2c1b
+	ld c,a ; size for memcpy_8bit, hl set to source
+	;size for second memcpy is 52-size
+	ld a,52 	;2c2b
+	sub a,c	;1c1b
+	ld b,a ; b = 52-c ;1c1b
+	ld de, UIBuffer_Vertical+4 ;ignore the first line, which holds free image slots
+	call memcpy8_hl_to_de ;after this, de should be the start of our next region (dest)
+	ld a,BLANK_TILE_ID ;2c2b
+	call memfill8_a_into_de_sizeb ;10c4b call/ret, but memfill may be faster than memcpy, compensating for the decreased cycles
+  ret
+
 InitMenuState_CameraOpts::
   xor a
   ldh [MENU_STATE], a
   ldh [MENU_POSITION], a
   call MoveCursorSpriteToMenuPosition
+  
+  ld hl, SidebarArrangementViewfinder   ;Fill sidebar buffer with new prompts
+  call PrepareSidebar
+
   ret
 
 InitMenuState_Selected:
@@ -331,6 +386,9 @@ InitMenuState_Selected:
   xor a
   ldh [MENU_NYBBLE], a
   call MoveCursorSpriteToSelectedNybble
+
+  ld hl, SidebarArrangementSelected   ;Fill sidebar buffer with new prompts
+  call PrepareSidebar  
   ret
 
 InitMenuState_TakeConfirm:
@@ -340,7 +398,9 @@ InitMenuState_TakeConfirm:
   ld a, MENU_STATE_TAKE_CONFIRM
   ldh [MENU_STATE], a
   call MoveCursorSpriteToNowhere ;We will need to undo this upon EXITING the Take_Confirm menustate
-  ;Display the take confirm menu (which at the moment will just be changing the bottom-left vertical tile to display a confirmation tile) 
+  
+  ld hl, SidebarArrangementTakeConfirm   ;Fill sidebar buffer with new prompts
+  call PrepareSidebar
   ret
 
 

@@ -32,12 +32,19 @@ ClearHRAM:
 
 ; Clears the WRAM area that holds the tilemap data for the options UI.
 ClearOptionLinesBuffer:
+  ;Can replace with memfill
   ld a,BLANK_TILE_ID
   ld hl, OptionLinesBuffer
-  ld b,$41
+  ld b,$40-12 ;only the first 20 bytes for each line are used as the buffer. The other 12 bytes in each line are used for variables. Those variables must be initialized AFTER this runs
+  ;TODO ignore 12 bytes in the first row, too
   :ld [hli], a
   dec b
   jr nz,:-
+
+;This must not run before ClearOptionLinesBuffer, as it clears any variables in the 2 union regions.
+InitVariables:
+  ld a, $01
+  ld [ShowPromptsFlag], a
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
 BackupBank0:
@@ -156,20 +163,6 @@ InitTilemapAttributes:
     jr z, .fillCaptureAreaWithBank0
 
 LoadButtonTiles:
-  DEF BUTTON_TILES_ORIGIN_ADDR EQU $9400
-  DEF BUTTON_TILES_ORIGIN_TILENUM EQU $60
-  DEF PROMPT_NO_DPAD EQU BUTTON_TILES_ORIGIN_TILENUM
-  DEF PROMPT_RIGHT EQU BUTTON_TILES_ORIGIN_TILENUM + 1
-  DEF PROMPT_DOWN EQU BUTTON_TILES_ORIGIN_TILENUM + 2
-  DEF PROMPT_LEFT EQU BUTTON_TILES_ORIGIN_TILENUM + 3
-  DEF PROMPT_UP EQU BUTTON_TILES_ORIGIN_TILENUM + 4
-  DEF PROMPT_NO_A EQU BUTTON_TILES_ORIGIN_TILENUM + 5
-  DEF PROMPT_A EQU BUTTON_TILES_ORIGIN_TILENUM + 6
-  DEF PROMPT_NO_B EQU BUTTON_TILES_ORIGIN_TILENUM + 7
-  DEF PROMPT_B EQU BUTTON_TILES_ORIGIN_TILENUM + 8
-  DEF PROMPT_NO_STARTSELECT EQU BUTTON_TILES_ORIGIN_TILENUM + 12
-  DEF PROMPT_SELECT EQU BUTTON_TILES_ORIGIN_TILENUM + 13
-  DEF PROMPT_START EQU BUTTON_TILES_ORIGIN_TILENUM + 14
 
   ;At the end of InitTilemapAttributes, VRAM bank is 1, so we need not switch.
   ld hl, gfxButtons_storage
@@ -178,7 +171,6 @@ LoadButtonTiles:
   call memcpy_1bpp
 
 LoadActionTiles:
-  DEF ACTION_TILES_ORIGIN_ADDR EQU $9200
   ;At the end of InitTilemapAttributes, VRAM bank is 1, so we need not switch.
   ld hl, gfxActions_storage
   ld de, ACTION_TILES_ORIGIN_ADDR
@@ -238,22 +230,27 @@ BuildViewfinderTilemap: ;Maps the bottom-left tilemap area (+4 tiles on the left
     jr nz, .loop
 
 BuildHorizontalHeader: ;Fills the UI with the icons for each setting
-  IF SCREEN_FLIP_H
-    ld hl, TILEMAP_UI_ORIGIN_H
-  ELSE
-    ld hl, TILEMAP_UI_ORIGIN_H+3
-  ENDC
+  ld hl, TILEMAP_UI_ORIGIN_H
   ld de, UI_ICONS_ARRANGEMENT_H
 
   ld b, $2 ; number of lines (skips every other)
   : ld c, $5 ; number of tiles per line
-  : ld a,[de]
+  :
+  IF !SCREEN_FLIP_H
+    ld a,BLANK_TILE_ID
+    ld [hli], a
+    ld [hli], a
+    ld [hli], a ; 3 blank tiles between each icon
+  ENDC
+  ld a,[de]
   inc de
   ld [hli], a
-  ld a,BLANK_TILE_ID
-  ld [hli], a
-  ld [hli], a
-  ld [hli], a ; 3 blank tiles between each icon
+  IF SCREEN_FLIP_H ;put blank tiles after the icons
+    ld a,BLANK_TILE_ID
+    ld [hli], a
+    ld [hli], a
+    ld [hli], a ; 3 blank tiles between each icon
+  ENDC
   dec c
   jr nz, :- ;Line finished check
   dec b

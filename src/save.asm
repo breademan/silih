@@ -151,24 +151,21 @@ StateVector_GetMax:
 ;As a side effect, also returns SAVE_SLOTS_USED in a
 StateVector_CountUsedAndFree:
   ld hl, STATEVECTOR_START_ADDR
-  ld b,$00 ; b = used count
-  ld c, b  ; c = free count
+  ld c,$00 ; c = free count
 
   .loop:ld a, [hli]
   cp a,$1E ; if carry, it's used.
   jr c,.used
   .free: inc c
   jr .check
-  .used: inc b
+  .used:
   .check: ld a, LOW(STATEVECTOR_LAST_ADDR)+1
   cp a, l
   jr nz, .loop ;if next address is within bounds, loop
 
-  ; Write back used and free
+  ; Write back free
   ld a,c
   ld [SAVE_SLOTS_FREE], a
-  ld a,b
-  ld [SAVE_SLOTS_USED], a
 
   ;Add the initial free value to the vertical UI by calling 
   ld hl, SAVE_SLOTS_FREE
@@ -208,7 +205,7 @@ StateVector_FindAndFillFreeSlot::
   ld a,l
   cp a,LOW(STATEVECTOR_LAST_ADDR)+1
   jp nz,:-
-  ld c,$00
+  ld a,$00
   ret   ;if l==lastelement+1,
   .found
   ld a, l
@@ -216,7 +213,10 @@ StateVector_FindAndFillFreeSlot::
   push af ; bank number to fill with data
 
   dec l ;since we used an hli, we want to decrement hl to get back to the index we're looking at
-  ld a, [SAVE_SLOTS_USED]
+  ld a, [SAVE_SLOTS_FREE]; Instead of SAVE_SLOTS_USED, we'll use 1D-SAVE_SLOTS_FREE
+  ld c,a
+  ld a,$1D
+  sub a,c
   call StateVector_WriteByte
   ;Update the backup state vector upon successful save completion
   call StateVector_Backup

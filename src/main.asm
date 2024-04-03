@@ -47,7 +47,7 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptDither_RAM: ds 48 ; Working copy of the dither table
 .end  
   ;Video mirror register: 1 byte
-  wLCDC: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing
+  wLCDC: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing ;Must not be placed in the OptionLinesBuffer region as it is cleared after wLCDC was written.
   
   ;HDMA variables: 7 bytes
   hdma_current_transfer_length: db
@@ -60,8 +60,7 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   
   ;Save Slot variables: 2 bytes
   SAVE_SLOTS_FREE:: db
-  SAVE_SLOTS_USED:: db
-  
+  ShowPromptsFlag:: db  
   ;1 byte
   ContrastChangedFlag: db ;When contrast is changed, set this to 1
                         ;May be wise to change this to a CamOptChangedFlags bitfield to check if CamRegs changed, Contrast, Dither Pattern, or Dither Lighting
@@ -1127,6 +1126,29 @@ DrawSidebar:
   ld [hl],a
 
 ret
+
+;@param c = size in bytes
+;@param de = dest
+;@param hl = source
+;Copies data from src to dest.
+memcpy8_hl_to_de::
+  :ld a,[hli]
+  ld [de],a
+  inc de
+  dec c
+  jp nz,:-
+ret
+;@param b = size in bytes
+;@param de = dest
+;@param a = value with which to fill
+;Fills b bytes of de with a
+memfill8_a_into_de_sizeb::
+  :ld [de],a
+  inc de
+  dec b
+  jp nz,:-
+ret
+
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 
