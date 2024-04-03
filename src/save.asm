@@ -215,7 +215,7 @@ StateVector_FindAndFillFreeSlot::
   dec l ;since we used an hli, we want to decrement hl to get back to the index we're looking at
   ld a, [SAVE_SLOTS_FREE]; Instead of SAVE_SLOTS_USED, we'll use 1D-SAVE_SLOTS_FREE
   ld c,a
-  ld a,$1D
+  ld a,$1E
   sub a,c
   call StateVector_WriteByte
   ;Update the backup state vector upon successful save completion

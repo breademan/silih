@@ -21,34 +21,28 @@ ChangeOptionHandler_table:
 SidebarArrangementViewfinder:
   db (SidebarArrangementViewfinder.end - SidebarArrangementViewfinder) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_MODIFY, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Modify
-  db PROMPT_NO_DPAD, PROMPT_NO_B, PROMPT_A, PROMPT_NO_STARTSELECT;A button
+  db ACTION_MODIFY, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Modify: A button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Take photo
-  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Take photo: B button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_HANDOVER, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Cart Handover
-  db PROMPT_DOWN, PROMPT_NO_B, PROMPT_NO_A, PROMPT_SELECT;Down + Select
+  db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_DOWN, PROMPT_SELECT;Cart Handover: 
   .end
   ASSERT SidebarArrangementViewfinder.end - SidebarArrangementViewfinder <= 52, "SidebarArrangementViewfinder is too large"
 
 SidebarArrangementSelected:
   db (SidebarArrangementSelected.end - SidebarArrangementSelected) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Confirm
-  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Confirm: B button
   .end
 ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
 
 SidebarArrangementTakeConfirm:
   db (SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Confirm
-  db PROMPT_NO_DPAD, PROMPT_B, PROMPT_NO_A, PROMPT_NO_STARTSELECT;B button
+  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Confirm: B button
 
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID;Cancel
-  db PROMPT_NO_DPAD, PROMPT_NO_B, PROMPT_A, PROMPT_NO_STARTSELECT;A button
+  db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Cancel: A button
   .end
 
   ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"

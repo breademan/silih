@@ -37,9 +37,9 @@ DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include th
 DEF TILEMAP_UI_ORIGIN_H EQU $99C0 ;$9800 + 14 rows -- this includes the 'edge' at the top left
 
 ;Set if the screen is flipped vertically
-DEF SCREEN_FLIP_V EQU 1
+DEF SCREEN_FLIP_V EQU 0
 ;Set if the screen is flipped horizontally
-DEF SCREEN_FLIP_H EQU 1
+DEF SCREEN_FLIP_H EQU 0
 
 DEF MENU_STATE_CAMERA_OPTS EQU 0
 DEF MENU_STATE_DITHER_OPTS EQU 1

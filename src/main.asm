@@ -1103,7 +1103,16 @@ DrawSidebar:
   ld e,l ;+1
 
   ;Calculate destination address
+  IF SCREEN_FLIP_V
+  cpl
+  inc a
+  add a,52 ;If Vflipped, mirror line to draw to from top by changing a from rownum*4 to (13-rownum)*4 = 54-(rownum*4)
+  ENDC
+  IF SCREEN_FLIP_H ;If Hflipped, we'll start at the end of the line
+  ld hl, TILEMAP_UI_ORIGIN_V+3
+  ELSE
   ld hl, TILEMAP_UI_ORIGIN_V ;+3
+  ENDC
   add a,a ;+1
   add a,a ;+1
   add a,a ;this last leftshift will overflow a; if there was a carry, increment b ;+1
@@ -1112,7 +1121,21 @@ DrawSidebar:
   :ld c,a ;+1
   add hl,bc ; hl = start of 4 dest addresses: TILEMAP_UI_ORIGIN_V + (rownum*32) ;+2
 
-  ;Write buffer to the line ;19c
+  IF SCREEN_FLIP_H
+  ;Write buffer to the line, last to first ;19c
+  ld a,[de] ;+2
+  ld [hld],a ;+2
+  inc e ;de(source buffer) does not cross byte boundaries ;+1
+  ld a,[de]
+  ld [hld],a
+  inc e
+  ld a,[de]
+  ld [hld],a
+  inc e
+  ld a,[de]
+  ld [hl],a
+  ELSE
+  ;Write buffer to the line in-order;19c
   ld a,[de] ;+2
   ld [hli],a ;+2
   inc e ;de(source buffer) does not cross byte boundaries ;+1
@@ -1124,7 +1147,7 @@ DrawSidebar:
   inc e
   ld a,[de]
   ld [hl],a
-
+  ENDC
 ret
 
 ;@param c = size in bytes
