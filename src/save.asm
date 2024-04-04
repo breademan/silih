@@ -169,12 +169,8 @@ StateVector_CountUsedAndFree:
 
   ;Add the initial free value to the vertical UI by calling 
   ld hl, SAVE_SLOTS_FREE
-  IF SCREEN_FLIP_H
-  ld de, UIBuffer_Vertical+3
-  ELSE
   ld de, UIBuffer_Vertical+2
-  ENDC
-  call UpdateByteInTilemap
+  call UpdateByteInTilemap ; Sidebar buffer must be written to as if it was not rotated
   ret
 
   ;must not clobber b

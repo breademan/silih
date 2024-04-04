@@ -456,17 +456,30 @@ UpdateByteInTilemap::
   and a,$0F ;+2c2b
   or a,UI_ICONS_BASE_ID ;+1c1b
   ld [de], a ;+2c1b
-  IF SCREEN_FLIP_H==1 
-  dec e ;low nybble ;+1c1b
-  ELSE
   inc e
-  ENDC
   ld a,[hli] ;+2c1b
   and a,$0F ;+2c2b
   or a,UI_ICONS_BASE_ID ;+1c1b
   ld [de],a ;+2c1b
   ret ;+4c1b -- function call/ret is 10c/4b total
 
+;hl: location of byte to put into tilemap
+;de location in tilemap to load the data
+;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
+;assumes de doesn't cross a byte address boundary
+UpdateByteInTilemap_flipped::
+  ;17 cycles + call/ret
+  ld a, [hl] ;display high nybble +2c1b
+  swap a ;+2c2b
+  and a,$0F ;+2c2b
+  or a,UI_ICONS_BASE_ID ;+1c1b
+  ld [de], a ;+2c1b
+  dec e ;low nybble ;+1c1b
+  ld a,[hli] ;+2c1b
+  and a,$0F ;+2c2b
+  or a,UI_ICONS_BASE_ID ;+1c1b
+  ld [de],a ;+2c1b
+  ret ;+4c1b -- function call/ret is 10c/4b total
 
 
 ; Stop the current HDMA transfer, if there is one, and draw a UI line using GDMA
@@ -877,11 +890,11 @@ UpdateOptionBuffer_CamOptC:
     ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
     ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
     ld de, OptionLinesBuffer+VALSMAP_OFFSET+1 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
-    call UpdateByteInTilemap ;3b
+    call UpdateByteInTilemap_flipped ;3b
     inc e ;display LSB:H
     inc e 
     inc e ;^^+3c3b
-    call UpdateByteInTilemap ;3b
+    call UpdateByteInTilemap_flipped ;3b
   ELSE
   ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
   ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
@@ -905,7 +918,7 @@ UpdateOptionBuffer_CamOptO:
   ELSE
   ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
   ENDC
-  call UpdateByteInTilemap
+  call {UpdateByteInTilemap_rotation}
   ret
 
 
@@ -918,7 +931,7 @@ UpdateOptionBuffer_CamOptG:
   ELSE
   ld de, OptionLinesBuffer+VALSMAP_OFFSET+2
   ENDC  
-  call UpdateByteInTilemap
+  call {UpdateByteInTilemap_rotation}
   ret
 
 ;--------------------------------Handover Payloads---------------------------------------------------------
