@@ -16,10 +16,14 @@ SECTION "Init", ROM0[$0] ; This is where it starts executing once the program is
     
     SECTION "Launcher", ROM0[$150]
 launch:
+    ld b,a ;save reg a for CGB check -- we want to disable LCD asap
     xor a
     ldh  [rLCDC],a ; disable displaying anything. Disabling display when LY is less than $90 should cause problems on DMG, 
                   ; but it's always at 90 when DMG 
-    
+    ld a,b ; restore reg a for CGB check
+    cp a,$11
+    jp nz,.copy_payload_alt
+
     ld hl,$C000 ;start of WRAM
     ld de,PayloadStorage ;start of payload stored in ROM
 .copy_payload_wram0 ; for now, only copy C000-CFFF. Later, we may extend it to cover both banks
@@ -54,7 +58,21 @@ launch:
     
     ld  hl,$8000 ; start of VRAM
     ld  de,vram_data ; source of VRAM code
-.copy_code_to_vram ; copies the data in $0000 to $0FFF to $8000-87FF (VRAM)
+    jp .copy_code_to_vram
+
+    .copy_payload_alt
+    ;If we're running on a DMG, copy an alternative payload from 
+    ld hl,$C000
+    ld de,PayloadStorage_alt
+    :ld a,[de]
+    ld [hli], a
+    inc de
+    bit 4,h
+    jr z,:-
+    jp $C000
+
+
+    .copy_code_to_vram ; copies the data in $0000 to $0FFF to $8000-87FF (VRAM)
     ld  a,[de]
     inc de
     ld  [hl+],a

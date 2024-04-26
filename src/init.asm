@@ -14,6 +14,18 @@ Blank_Display:
   ld [wLCDC], a
   ldh [rLCDC], a
 
+;Check the currently inserted cart's header.
+;There are multiple Camera ROMs, and I don't know all of their headers.
+;Instead of checking for Camera headers, check for the launcher cart's headers. If the launching cart is still inserted, we want to run an alternate payload.
+;Tentatively, serial controller. We may want to add an options screen too.
+
+ld de, $0134 ;Title string stored on ROM
+ld hl, LoaderTitle ;Title string of the loader
+ld c, LoaderTitle.end - LoaderTitle ;Length of our target title string
+call memcmp
+jp z, LaunchAlternativePayload
+
+
 BlankOAM:
   xor a
   ld  hl,$FE00

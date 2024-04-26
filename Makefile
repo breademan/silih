@@ -6,7 +6,7 @@ ASFLAGS := -i inc/ -i data/ -o
 LD := $(RGBDS_PATH)rgblink
 LDFLAGS := -x -n bin/silih.sym -o 
 FX := $(RGBDS_PATH)rgbfix
-FXFLAGS := -c -p 0 -r 0 -t CGB_EXAMPLE -v
+FXFLAGS := -c -p 255 -r 0 -t SILIH -v
 
 GFX := $(RGBDS_PATH)rgbgfx
 GFXFLAGS := -d1 -o 
@@ -17,7 +17,7 @@ cgb_rom := bin/$(cgb_name:.asm=.gbc)
 
 all:	bin/silih.gbc
 
-bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o
+bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o bin/remote.o
 	$(LD) $(LDFLAGS) $@ $^
 	$(FX) $(FXFLAGS) $@
 		

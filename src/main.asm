@@ -75,7 +75,7 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
 
 SECTION "Payload SECTION",ROM0[$1000]
 PayloadStorage::
-    LOAD "Payload LOAD", WRAM0 [$C000]
+    LOAD UNION "Payload LOAD", WRAM0 [$C000]
 PayloadEntrypoint:
     xor a
     ldh [rNR52], a ;disable sound
@@ -1185,6 +1185,44 @@ memfill8_a_into_de_sizeb::
   jp nz,:-
 ret
 
+
+;@param  c = size in bytes
+;@param hl = pointer to str1
+;@param de = pointer to str2
+;Compares the (possibly non-null-terminated) strings in hl and de. Returns 0 in a if the strings are equal, -1 otherwise.
+;@clobber a,hl,de,c
+memcmp::
+  .loop: 
+  ld a,[de]
+  inc de
+  cp a,[hl] ;check if vlaues are equal
+  inc hl ; doesn't affect flags
+  jr z,:+
+    ld a,-1 ;If the values are different, return -1
+    ret
+  :dec c
+  jr nz,.loop ;if we've not reached end of buffer, loop
+  
+  ld a,0 ;if we've reached end of buffer with all bytes equal, return 0
+ret
+
+;Subroutine jumped to early in the init process -- since it's launching an alternate payload, it does not return.
+LaunchAlternativePayload::
+;Switch to the bank containing the alternate payload.
+;Since we aim for DMG support here, we need to be able to do this without bankswitching.
+;Presumably this means that we should store the alternative payload in the last bank that the launcher copies.
+;Alternatively, we could check at the start of launcher for DMG mode, but that means we would have two separate launch systems for the alternate payload: here (for GBC) and in the launcher (for DMG) 
+;in the launcher for DMG ROM
+
+;A simpler solution is to set the flags as if it were a DMG, jump back to the launcher ROM, and let the launcher rom do the alternate payload.
+;+We won't need to make the entire launcher DMG-compatable
+;- The alternative payload will run from either CGB-mode or DMG mode, depending on what it's launched from.
+
+;TODO set flags as if DMG/MGB/SGB
+xor a
+jp $100 ; jp back to launcher ROM
+
+
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 
@@ -1272,6 +1310,9 @@ OrderTableRelative: db (7-15),(13-7), (5-13), \
       (3-5),(11-3), (1-11), (9-1), \
       (12-9), (4-12), (14-4), (6-14), \
       (0-6), (8-0), (2-8), (10-2)
+.end
+
+LoaderTitle:: db "SILIH"
 .end
 
 EndRAM0:
