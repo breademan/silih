@@ -2,16 +2,17 @@ INCLUDE "src/hardware.inc"
 
 INCLUDE "src/general.inc"
 
+DEF REM_BTN_TILEID EQU $46
 SECTION "Remote Payload Data SECTION",ROM0[$1000 + ($1000*BACKUP_BANK)]
 PayloadStorage_alt::
 LOAD UNION "Payload LOAD", WRAM0 [$C000]
 EntryPoint:
-    ; Shut down audio circuitry
-    ld a, 0
-    ldh [rNR52], a
+  ; Shut down audio circuitry
+  ld a, 0
+  ldh [rNR52], a
 
-    ; Do not turn the LCD off outside of VBlank
-    ; The launcher has already disabled LCD, so this will lead to an infinite loop
+  ; Do not turn the LCD off outside of VBlank
+  ; The launcher has already disabled LCD, so this will lead to an infinite loop
 ; WaitVBlank:
 ;     ldh a, [rLY]
 ;     cp 144
@@ -21,43 +22,94 @@ EntryPoint:
 ;     xor a
 ;     ld [rLCDC], a
 
-    ; Copy the tile data
-    ld de, Tiles
-    ld hl, $9000
-    ld bc, TilesEnd - Tiles
+  ; Copy the tile data
+  ld de, Tiles
+  ld hl, $9000
+  ld bc, TilesEnd - Tiles
 CopyTiles:
-    ld a, [de]
-    ld [hli], a
-    inc de
-    dec bc
-    ld a, b
-    or a, c
-    jp nz, CopyTiles
+  ld a, [de]
+  ld [hli], a
+  inc de
+  dec bc
+  ld a, b
+  or a, c
+  jp nz, CopyTiles
 
-    ; Copy the tilemap
-    ld de, Tilemap
-    ld hl, $9800
-    ld bc, TilemapEnd - Tilemap
+  ; Copy the tilemap
+  ld de, Tilemap
+  ld hl, $9800
+  ld bc, TilemapEnd - Tilemap
 CopyTilemap:
-    ld a, [de]
-    ld [hli], a
-    inc de
-    dec bc
-    ld a, b
-    or a, c
-    jp nz, CopyTilemap
+  ld a, [de]
+  ld [hli], a
+  inc de
+  dec bc
+  ld a, b
+  or a, c
+  jp nz, CopyTilemap
 
-    ; Turn the LCD on
-    ld a, LCDCF_ON | LCDCF_BGON
-    ldh [rLCDC], a
+  ; Turn the LCD on
+  ld a, LCDCF_ON | LCDCF_BGON
+  ldh [rLCDC], a
 
-    ; During the first (blank) frame, initialize display registers
-    ld a, %11100100
-    ldh [rBGP], a
+  ; During the first (blank) frame, initialize display registers
+  ld a, %11100100
+  ldh [rBGP], a
 
-Done:
+Main:
     
-    jp Done
+
+  .checkForNotActive
+  ;Don't set the ready flag if it's already set -- that means a transfer should still be happening.
+  ldh a,[rSC]
+  and a,SCF_START
+  jr nz, .checkForNotActive ;infinite loop until SC=0. This should really timeout to resample the joypad every so often.
+  ;Now that we know no transfer is active, we can populate SB with the packet and set the flag to indicate transfer ready.
+  ld a,(P1F_GET_DPAD ^ $FF) ;request DPAD
+  ldh [rP1],a ; get dpad (in lower 4 bits)
+  ldh a,[rP1]
+  and a,$0F
+  swap a
+  ld b,a ;b7:4 = dpad state (0 denotes pressed)
+
+  ld a,(P1F_GET_BTN ^ $FF) ;request BTN
+  ldh [rP1], a
+  ldh a,[rP1]
+  and a,$0F
+  or a,b ; a = dpad:btn, where 0 denotes pressed
+  cpl ; a = dpad:btn, where 1 denotes pressed. This is to prevent an all-1 byte (cable disconnect) unless EVERYTHING is pressed
+  swap a ;I must have generated the tables backwards somehow: The nybbles are swapped on decode if I don't swap the nybbles before encode
+
+
+
+  ;Encode joypad
+  ld hl, EncodingTable
+  ;16-bit add a to hl to get the address of the encoded byte
+  add a, l
+  ld l,a
+  adc h
+  sub l
+  ld h,a
+  ld a, [hl]
+  
+  ldh [rSB],a ;load data into SB
+  ld a,%10000000
+  ldh [rSC],a ;indicate ready
+
+  .waitForTransferComplete ;wait until SC7 becomes 0 again (transfer complete)
+  ldh a,[rSC]
+  and a,SCF_START
+  jr nz,.waitForTransferComplete
+
+  ;TODO display what is in SB. We don't want to stall to wait for vblank, nor use interrupts.
+  ;If we're in Vblank at the end of this, change the graphics. Otherwise, leave them be?
+  
+  jp .checkForNotActive
+
+
+jp Main
+
+
     
 Tiles:
     db $00,$ff, $00,$ff, $00,$ff, $00,$ff, $00,$ff, $00,$ff, $00,$ff, $00,$ff
@@ -130,6 +182,8 @@ Tiles:
     db $54,$ff, $aa,$ff, $54,$ff, $aa,$ff, $54,$ff, $aa,$ff, $54,$ff, $00,$ff
     db $15,$ff, $2a,$ff, $15,$ff, $0a,$ff, $15,$ff, $0a,$ff, $01,$ff, $00,$ff
     db $01,$ff, $80,$ff, $01,$ff, $80,$ff, $01,$ff, $80,$ff, $01,$ff, $00,$ff
+    .remoteButtons_storage:
+    incbin "assets/UserButtons.1bpp",0,128
 TilesEnd:
 
 Tilemap:
@@ -153,5 +207,22 @@ Tilemap:
     db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,  0,0,0,0,0,0,0,0,0,0,0,0
 TilemapEnd:
 
+EncodingTable:
+    db $38,$31,$32,$31,$34,$31,$32,$31,$37,$31,$32,$31,$34,$31,$32,$31
+    db $20,$40,$01,$40,$02,$40,$01,$40,$43,$40,$01,$40,$02,$40,$01,$40
+    db $23,$04,$45,$04,$46,$04,$45,$04,$07,$04,$45,$04,$46,$04,$45,$04
+    db $23,$04,$45,$04,$46,$04,$45,$04,$07,$04,$45,$04,$46,$04,$45,$04
+    db $25,$08,$49,$08,$4A,$08,$49,$08,$0B,$08,$49,$08,$4A,$08,$49,$08
+    db $29,$10,$51,$10,$52,$10,$51,$10,$13,$10,$51,$10,$52,$10,$51,$10
+    db $2A,$54,$15,$54,$16,$54,$15,$54,$57,$54,$15,$54,$16,$54,$15,$54
+    db $2A,$54,$15,$54,$16,$54,$15,$54,$57,$54,$15,$54,$16,$54,$15,$54
+    db $26,$4C,$0D,$4C,$0E,$4C,$0D,$4C,$4F,$4C,$0D,$4C,$0E,$4C,$0D,$4C
+    db $2C,$58,$19,$58,$1A,$58,$19,$58,$5B,$58,$19,$58,$1A,$58,$19,$58
+    db $2F,$1C,$5D,$1C,$5E,$1C,$5D,$1C,$1F,$1C,$5D,$1C,$5E,$1C,$5D,$1C
+    db $2F,$1C,$5D,$1C,$5E,$1C,$5D,$1C,$1F,$1C,$5D,$1C,$5E,$1C,$5D,$1C
+    db $26,$4C,$0D,$4C,$0E,$4C,$0D,$4C,$4F,$4C,$0D,$4C,$0E,$4C,$0D,$4C
+    db $2C,$58,$19,$58,$1A,$58,$19,$58,$5B,$58,$19,$58,$1A,$58,$19,$58
+    db $2F,$1C,$5D,$1C,$5E,$1C,$5D,$1C,$1F,$1C,$5D,$1C,$5E,$1C,$5D,$1C
+    db $2F,$1C,$5D,$1C,$5E,$1C,$5D,$1C,$1F,$1C,$5D,$1C,$5E,$1C,$5D,$1C
 
 ENDL

@@ -55,6 +55,12 @@ ClearOptionLinesBuffer:
 
 ;This must not run before ClearOptionLinesBuffer, as it clears any variables in the 2 union regions.
 InitVariables:
+  xor a
+  ld [RemoteJoypadState],a
+  ld [RemoteJoypadPrevState],a
+  ld [RemoteJoypadNewPressed],a
+  ld [RemoteJoypadActive],a
+  
   ld a, $01
   ld [ShowPromptsFlag], a
 
@@ -119,6 +125,8 @@ InitInput:
   ld a, $09 ; Amount of frames to wait before setting held buttons as active buttons
   ldh [joypad_hold_ready_interval], a
   ldh [joypad_hold_interval], a
+  ld [RemoteJoypadHoldThreshold],a
+  ld [RemoteJoypadHoldCounter],a
   .findGetInput: ;Finds the GetInput function from the original ROM by finding the fifth call in the Vblank ISR
   ;Follow the VBlank vector
   ld a, [$0041]	;3b4c

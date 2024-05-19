@@ -64,13 +64,20 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;1 byte
   ContrastChangedFlag: db ;When contrast is changed, set this to 1
                         ;May be wise to change this to a CamOptChangedFlags bitfield to check if CamRegs changed, Contrast, Dither Pattern, or Dither Lighting
+  ;5 bytes
+  RemoteJoypadHoldThreshold: db
+  RemoteJoypadHoldCounter: db
+  RemoteJoypadState: db
+  RemoteJoypadPrevState: db
+  RemoteJoypadNewPressed: db
+  RemoteJoypadActive: db
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
   UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
 
-  ;Cumulative $D8 bytes
-  ;$28 bytes remaining
+  ;Cumulative $DD bytes
+  ;$22 bytes remaining
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -89,9 +96,7 @@ ViewfinderMain:
   xor a
   ldh [VBlank_finished_flag],a ;clear the VBlank finished flag
 
-
-    ;Input format is D U L R: START SEL A B
-    GetInputPtr: call $0000
+  call GetSerialInput
 
   ld a, UI_RAMBANK
   ldh [rSVBK], a
@@ -442,6 +447,9 @@ UpdateValsMap_WRAM:
 
   call UpdateOptionBuffer_DitherTable
 
+  call UpdateOptionBuffer_Undecided1
+
+  call UpdateOptionBuffer_Undecided2
   ret
 
 
@@ -934,6 +942,22 @@ UpdateOptionBuffer_CamOptG:
   call {UpdateByteInTilemap_rotation}
   ret
 
+UpdateOptionBuffer_Undecided1:
+  GET_UI_OFFSET "RemoteJoypadActive"
+  ; 2 nybbles
+  ld hl,RemoteJoypadActive
+  IF SCREEN_FLIP_H==1 
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
+  ELSE
+  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2
+  ENDC  
+  call {UpdateByteInTilemap_rotation}
+  ret
+
+
+UpdateOptionBuffer_Undecided2:
+  ret
+
 ;--------------------------------Handover Payloads---------------------------------------------------------
 HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
   .start
@@ -1218,10 +1242,76 @@ LaunchAlternativePayload::
 ;+We won't need to make the entire launcher DMG-compatable
 ;- The alternative payload will run from either CGB-mode or DMG mode, depending on what it's launched from.
 
-;TODO set flags as if DMG/MGB/SGB
-xor a
+xor a ;set flags as if DMG/MGB/SGB -- DMG/SGB is 01, MGB/SGB2 is $FF, but as long as it's not $11 we're not CGB.
 jp $100 ; jp back to launcher ROM
 
+
+GetSerialInput:
+CheckSerial:
+  .startTransfer
+  ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
+  ldh [rSC], a
+  ;Input format is D U L R: START SEL A B
+  GetInputPtr: call $0000
+  ;Here, the transfer should be finished and SC should be reset to 0.
+  ;TODO: wait for SC to be low, with timeout. Currently we just assume the transfer finished.
+  ldh a,[rSB]
+  ;Verify the sent packet <= maximum valid value ($5E)
+  cp a,DECODING_MAX_VALUE+1 ;if carry, a<MAX+1 (packet data) (invalid packet)
+  jp nc, .badPacket
+
+  ;Decode: add a to hl
+  ld hl, DecodingTable
+  add a, l
+  ld l,a
+  adc h
+  sub l
+  ld h,a
+  ld a, [hl]
+  ;if decoding returned FF, the encoding is invalid.
+  cp a,$FF
+  jp z,.badPacket
+  ld [RemoteJoypadState],a
+
+
+
+  ;Count down, filter out non-new inputs if counter is not hit
+  ;RemoteJoypadActive = (RemoteJoypadState xor RemoteJoypadPrevState) and RemoteJoypadState "changed keys, but only the ones that are currently pressed"
+  ld b,a ; b = RemoteJoypadState
+  ld a,[RemoteJoypadPrevState]
+  ld c,a ;c = RemoteJoypadPrevState, for later
+  xor a,b
+  and b
+  ld [RemoteJoypadActive],a ;active is only newly-pressed buttons
+  ;If no new joypad data (or 0), reset the counter to threshold
+  ld a, b
+  and a ; check if RemoteJoypadState is 0
+  jp z, .notHeld
+  xor a,c ; a = State xor PrevState
+  jp nz, .notHeld
+  .held
+  ;decrement the hold counter
+  ld hl,RemoteJoypadHoldCounter
+  dec [hl]
+  jp nz,.updatePrev
+  ;if hold counter is zero,
+  ld a,b ; a = RemoteJoypadState
+  ld [RemoteJoypadActive],a ; set RemoteJoypadActive to RemoteJoypadState
+  ld a,[RemoteJoypadHoldThreshold]
+  ld [RemoteJoypadHoldCounter],a ;Reset remote joypad's hold counter
+
+  .notHeld
+
+  .updatePrev
+  ld a,b ;RemoteJoypadPrevState = RemoteJoypadState
+  ld [RemoteJoypadPrevState],a
+  ret
+
+.badPacket
+  xor a
+  ld [RemoteJoypadPrevState],a
+  ld [RemoteJoypadActive],a
+  ret
 
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
@@ -1314,6 +1404,19 @@ OrderTableRelative: db (7-15),(13-7), (5-13), \
 
 LoaderTitle:: db "SILIH"
 .end
+
+;Any entry >$7F has the Z bit set and is invalid as a matter of course
+;Due to degreees of freedom in encoding, the encoder should only produce outputs <$5F
+;There are some valid encodings between $60 and $7F that are in-spec, but our encoder shouldn't produce them, and we can ignore them to save space.
+DecodingTable:
+  db $FF,$12,$14,$FF,$21,$FF,$FF,$28,$41,$FF,$FF,$48,$FF,$82,$84,$FF
+  db $51,$FF,$FF,$58,$FF,$62,$64,$FF,$FF,$92,$94,$FF,$A1,$FF,$FF,$A8
+  db $10,$FF,$FF,$20,$FF,$40,$80,$FF,$FF,$50,$60,$FF,$90,$FF,$FF,$A0
+  db $FF,$01,$02,$FF,$04,$FF,$FF,$08,$00,$FF,$FF,$00,$FF,$00,$00,$FF
+  db $11,$FF,$FF,$18,$FF,$22,$24,$FF,$FF,$42,$44,$FF,$81,$FF,$FF,$88
+  db $FF,$52,$54,$FF,$61,$FF,$FF,$68,$91,$FF,$FF,$98,$FF,$A2,$A4;,$FF
+;  db $FF,$10,$20,$FF,$40,$FF,$FF,$80,$50,$FF,$FF,$60,$FF,$90,$A0,$FF
+;  db $01,$FF,$FF,$02,$FF,$04,$08,$FF,$FF,$00,$00,$FF,$00,$FF,$FF,$00
 
 EndRAM0:
     assert EndRAM0 < WRAM_Var_Area0, "Code is outside of $D000-$100stack-$78 OAMtemp - variables area."
