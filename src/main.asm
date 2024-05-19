@@ -1301,10 +1301,17 @@ CheckSerial:
   ld [RemoteJoypadHoldCounter],a ;Reset remote joypad's hold counter
 
   .notHeld
+  ;TODO if nothing is held, JoypadHoldCounter should be reset
 
   .updatePrev
   ld a,b ;RemoteJoypadPrevState = RemoteJoypadState
   ld [RemoteJoypadPrevState],a
+  ;Combine joypad_active and RemoteJoypadActive
+  ld a,[RemoteJoypadActive]
+  ld b,a
+  ldh a,[joypad_active]
+  or a,b
+  ldh [joypad_active],a
   ret
 
 .badPacket
