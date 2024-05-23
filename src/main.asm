@@ -1286,22 +1286,25 @@ CheckSerial:
   ;If no new joypad data (or 0), reset the counter to threshold
   ld a, b
   and a ; check if RemoteJoypadState is 0
-  jp z, .notHeld
+  jr z, .notHeld
   xor a,c ; a = State xor PrevState
-  jp nz, .notHeld
+  jr nz, .notHeld
   .held
   ;decrement the hold counter
   ld hl,RemoteJoypadHoldCounter
   dec [hl]
-  jp nz,.updatePrev
+  jr nz,.updatePrev
   ;if hold counter is zero,
   ld a,b ; a = RemoteJoypadState
   ld [RemoteJoypadActive],a ; set RemoteJoypadActive to RemoteJoypadState
   ld a,[RemoteJoypadHoldThreshold]
   ld [RemoteJoypadHoldCounter],a ;Reset remote joypad's hold counter
+  jr .updatePrev
 
   .notHeld
-  ;TODO if nothing is held, JoypadHoldCounter should be reset
+  ;If nothing is held, JoypadHoldCounter should be reset
+  ld a,[RemoteJoypadHoldThreshold]
+  ld [RemoteJoypadHoldCounter],a
 
   .updatePrev
   ld a,b ;RemoteJoypadPrevState = RemoteJoypadState
@@ -1416,6 +1419,7 @@ LoaderTitle:: db "SILIH"
 ;Due to degreees of freedom in encoding, the encoder should only produce outputs <$5F
 ;There are some valid encodings between $60 and $7F that are in-spec, but our encoder shouldn't produce them, and we can ignore them to save space.
 DecodingTable:
+IF SCREEN_FLIP_H==0 && SCREEN_FLIP_V==0
   db $FF,$12,$14,$FF,$21,$FF,$FF,$28,$41,$FF,$FF,$48,$FF,$82,$84,$FF
   db $51,$FF,$FF,$58,$FF,$62,$64,$FF,$FF,$92,$94,$FF,$A1,$FF,$FF,$A8
   db $10,$FF,$FF,$20,$FF,$40,$80,$FF,$FF,$50,$60,$FF,$90,$FF,$FF,$A0
@@ -1424,6 +1428,16 @@ DecodingTable:
   db $FF,$52,$54,$FF,$61,$FF,$FF,$68,$91,$FF,$FF,$98,$FF,$A2,$A4;,$FF
 ;  db $FF,$10,$20,$FF,$40,$FF,$FF,$80,$50,$FF,$FF,$60,$FF,$90,$A0,$FF
 ;  db $01,$FF,$FF,$02,$FF,$04,$08,$FF,$FF,$00,$00,$FF,$00,$FF,$FF,$00
+ELIF SCREEN_FLIP_H==1 && SCREEN_FLIP_V==1
+  db $FF,$22,$24,$FF,$11,$FF,$FF,$18,$81,$FF,$FF,$88,$FF,$42,$44,$FF
+  db $A1,$FF,$FF,$A8,$FF,$92,$94,$FF,$FF,$62,$64,$FF,$51,$FF,$FF,$58
+  db $20,$FF,$FF,$10,$FF,$80,$40,$FF,$FF,$A0,$90,$FF,$60,$FF,$FF,$50
+  db $FF,$01,$02,$FF,$04,$FF,$FF,$08,$00,$FF,$FF,$00,$FF,$00,$00,$FF
+  db $21,$FF,$FF,$28,$FF,$12,$14,$FF,$FF,$82,$84,$FF,$41,$FF,$FF,$48
+  db $FF,$A2,$A4,$FF,$91,$FF,$FF,$98,$61,$FF,$FF,$68,$FF,$52,$54,;$FF
+;  db $FF,$20,$10,$FF,$80,$FF,$FF,$40,$A0,$FF,$FF,$90,$FF,$60,$50,$FF
+;  db $01,$FF,$FF,$02,$FF,$04,$08,$FF,$FF,$00,$00,$FF,$00,$FF,$FF,$00
+ENDC
 
 EndRAM0:
     assert EndRAM0 < WRAM_Var_Area0, "Code is outside of $D000-$100stack-$78 OAMtemp - variables area."
