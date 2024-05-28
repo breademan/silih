@@ -25,7 +25,7 @@ bin/loader.o: src/loader/loader.asm
 	$(AS) $(ASFLAGS) $@ src/loader/loader.asm
 
 #This should have a prerequisite for all .1bpp asset files, but doesn't -- right now we're just hard-coding them
-bin/%.o: src/%.asm assets/viewfinderUI.1bpp assets/UserButtons.1bpp assets/actions.1bpp assets/objects0.1bpp
+bin/%.o: src/%.asm assets/viewfinderUI.1bpp assets/UserButtons.1bpp assets/actions.1bpp assets/objects0.1bpp assets/palette.bin
 	$(AS) $(ASFLAGS) $@ $<
 
 clean:
@@ -36,3 +36,6 @@ clean:
 
 assets/%.1bpp : src/res/%.png
 		$(GFX) $(GFXFLAGS) $@ $<
+
+assets/palette.bin : src/res/palette.bin
+		cp src/res/palette.bin assets/palette.bin

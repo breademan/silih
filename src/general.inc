@@ -86,3 +86,7 @@ DEF UpdateByteInTilemap_rotation EQUS "UpdateByteInTilemap_flipped"
 ELSE
 DEF UpdateByteInTilemap_rotation EQUS "UpdateByteInTilemap"
 ENDC
+
+
+DEF NUM_BG_PALETTES EQU 2
+DEF NUM_OBJ_PALETTES EQU 2

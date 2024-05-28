@@ -106,7 +106,7 @@ vram_start: ; VRAM code start
 
 .init_palette
     ld  b,$10 ; 2 palettes
-    ld  hl,palette
+    ld  hl,loader_palette
 .palette_loop_obj
     ld  a,[hl+]
     ldh  [rOCPD],a
@@ -358,7 +358,7 @@ INCBIN "src/loader/ui_arrangements_wait.bin"
 confirmedArrangements:
 INCBIN "src/loader/ui_arrangements_confirmed.bin"
 
-palette:
+loader_palette:
 INCBIN "src/loader/palette.bin"
 
 hdma_data:

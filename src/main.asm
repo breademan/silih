@@ -996,7 +996,7 @@ checker_payload:
   ;OAM copy 
   ld a,$d4
   ldh [rDMA],a
-  ld a,$24 ;OAM copy waitloop
+  ld a,$0E ;OAM copy waitloop: number of cycles burned = 4*counter- 1
   :dec a
   jr nz, :-
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
@@ -1005,9 +1005,75 @@ checker_payload:
   and a,ROM_RAM_HANDOVER_MASK ; 2c
   cp a, ROM_RAM_HANDOVER_MASK ; 2c
   jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
+  ;Move BGP values into CGB BG palette 0 
+  ;We will have 4 color values (Little-endian 555) stored. 0=White, 1:Light Gray, 2:Dark Gray, 3: Black
+  ld a, BCPSF_AUTOINC | $00 ;2c2b
+  ldh [rBCPS],a   ;Set BCPS address to CGB palette 0, autoincrement ;3c 2b
+  ldh a,[rBGP] ;3c 2b
+  ld d,a ;Load BGP (33221100) into d ;1c 1b
+  ;9c
+
+  and a,%00000011 ;2c 2b
+  add a,a ; a = 2*BGP[1:0], index in our palette table ;1c 1b
+    ld hl, .stockPaletteData+$8000-checker_payload ;3c3b
+    add a,l ;1c 1b
+    ld l,a ;hl = address in palette table ;1c 1b
+    ld a, [hli] ;2c 1b
+    ldh [rBCPD], a ;3c 1b
+    ld a, [hl] ;2c 1b
+    ldh [rBCPD], a ;load palette data from table into CGB palette ;3c 1b
+    ;18c
+
+  sra d ;2c2b
+  ld a,d
+  and a,%00000110 ;a = 2*BGP[3:2] ;2c2b
+    ld hl, .stockPaletteData+$8000-checker_payload
+    add a,l
+    ld l,a ;hl = address in palette table
+    ld a, [hli]
+    ldh [rBCPD], a
+    ld a, [hl]
+    ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;5+15 = 20c
+
+  sra d
+  sra d
+  ld a,d
+  and a,%00000110 ;a = 2*BGP[5:4]
+    ld hl, .stockPaletteData+$8000-checker_payload
+    add a,l
+    ld l,a ;hl = address in palette table
+    ld a, [hli]
+    ldh [rBCPD], a
+    ld a, [hl]
+    ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;22c
+
+    sra d
+    sra d
+    ld a,d
+    and a,%00000110 ;a = 2*BGP[7:6]
+      ld hl, .stockPaletteData+$8000-checker_payload
+      add a,l
+      ld l,a ;hl = address in palette table
+      ld a, [hli]
+      ldh [rBCPD], a
+      ld a, [hl]
+      ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;22c
+  ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
+
   xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
   jp HRAM_RETURN_POINT
   
+  ;4 palettes: store little-endian
+  ;dw's are little-endian, too
+  .stockPaletteData
+  dw $7FFF ;White
+  dw $5294 ;Light Gray
+  dw $294A ;Dark Gray
+  dw $0000 ;Black
+
   .handoverToRAM
   ;turn off the screen to ensure VRAM1 is accessible
   xor a ;1c
@@ -1438,6 +1504,12 @@ ELIF SCREEN_FLIP_H==1 && SCREEN_FLIP_V==1
 ;  db $FF,$20,$10,$FF,$80,$FF,$FF,$40,$A0,$FF,$FF,$90,$FF,$60,$50,$FF
 ;  db $01,$FF,$FF,$02,$FF,$04,$08,$FF,$FF,$00,$00,$FF,$00,$FF,$FF,$00
 ENDC
+
+palette:
+  ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
+  ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
+  ;In the bin file, specify in RGB555: (dont-care/0):Blue5:Green5:Red5
+  INCBIN "assets/palette.bin"
 
 EndRAM0:
     assert EndRAM0 < WRAM_Var_Area0, "Code is outside of $D000-$100stack-$78 OAMtemp - variables area."

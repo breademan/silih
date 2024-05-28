@@ -150,6 +150,27 @@ InitInput:
 	ld a, [hli]	;1b2c
 	ld [GetInputPtr+2], a ; 3b4c high bit
 
+InitPalettes:
+ld a, $80
+ldh [rBCPS],a ;Set BG palette index to 0, auto-increment
+ldh [rOCPS],a ;Set OBJ palette index to 0, auto-increment
+
+.init_palette
+  ld  b,NUM_OBJ_PALETTES*$08
+  ld  hl,palette
+.palette_loop_obj
+  ld  a,[hl+]
+  ldh  [rOCPD],a
+  dec b
+  jr  nz,.palette_loop_obj
+  ld  b,NUM_BG_PALETTES*$08
+.palette_loop_bg
+  ld  a,[hl+]
+  ldh  [rBCPD],a
+  dec b
+  jr  nz,.palette_loop_bg
+
+
 ;Changes tile attributes in the VRAM bank 1 attribute map.
 ;Also fills the tilemaps to point to the correct VRAM bank, making the area that we use as the window (the top) use tiles from VRAM bank 1 
 InitTilemapAttributes:
