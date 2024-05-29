@@ -8,6 +8,7 @@ Currently, it is missing several important features.
 ## Current Features
 - Modify the camera registers and contrast setting
 - Take a picture
+- Remote control over the link cable
 
 ## Planned Features
 - Gallery to view and delete pictures
@@ -15,17 +16,17 @@ Currently, it is missing several important features.
 - Assisted mode similar to Photo!
 
 ## Maybe-not-planned Features
-- DMG support. This includes the original Game Boy / Pocket / Light / Super Game Boy 1 and 2. The DMG does not have enough RAM to store the entire payload, and we use CGB-exclusive features like DMA transfers and rotation. Though conceivably possible (and definitely possible for the SGB!), no support for these platforms are planned.
+- DMG support. This includes the original Game Boy / Pocket / Light / Super Game Boy 1 and 2. The DMG does not have enough RAM to store the entire payload, and we use CGB-exclusive features like DMA transfers and rotation. Though conceivably possible (and definitely possible for the SGB!), no support for these platforms is planned.
 
 ## Quickstart
 Download the appropriate release from our [releases page](https://github.com/breademan/silih/releases/latest), flash it onto a flash cart, and run it on your Game Boy Color/Advance/Game Boy Advance SP.
-When you see the screen that says "Press A to play," carefully remove the flash cart and insert your Game Boy Camera cart and press any button. 
+When you see the screen that says "Press A to play," carefully remove the flash cart, insert your Game Boy Camera cart, and press any button. 
 If for some reason you want to run it in an emulator, only some emulators support both the Game Boy Camera AND yanking Game Paks while the game is running. BGB or Sameboy are recommended.
 
 ## Controls (subject to change because they're terrible)
 - __A__: Change an option. Pressing B will let you exit the menu.
 - __B__: Take a photo. Once the viewfinder has stopped changing, pressing B again will save the picture, and pressing A will discard it.
-- __SELECT+DOWN__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+UP. 
+- __SELECT+UP__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+DOWN. 
 
 ## Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.
@@ -38,6 +39,9 @@ The camera registers are best described in [the readme for Photo!](https://githu
 - __Contrast__: Determines what values are used in the dither table and how close together the values are to each other.
 - __Dither Table__: The ROM has 3 tables of base values used for dithering: 0 for low light conditions, 1 for high light conditions, and 2 unused.
 
+## Remote Controller
+Silihcam can be controlled remotely by another Game Boy over the link cable port. This is useful for taking stabilized shots.\
+When the Silihcam cart is run on a device that is not CGB-compatible, pressing a button will instead launch the remote controller. It can also be launched on a CGB-compatible device by pressing a button in the launcher without cartswapping.
 
 ## Building on Linux / macOS
 1. Install [RGBDS](https://rgbds.gbdev.io/install) 0.6.1 and GNU Make (most systems already have this installed)  

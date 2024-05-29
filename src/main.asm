@@ -447,9 +447,6 @@ UpdateValsMap_WRAM:
 
   call UpdateOptionBuffer_DitherTable
 
-  call UpdateOptionBuffer_Undecided1
-
-  call UpdateOptionBuffer_Undecided2
   ret
 
 
@@ -942,22 +939,6 @@ UpdateOptionBuffer_CamOptG:
   call {UpdateByteInTilemap_rotation}
   ret
 
-UpdateOptionBuffer_Undecided1:
-  GET_UI_OFFSET "RemoteJoypadActive"
-  ; 2 nybbles
-  ld hl,RemoteJoypadActive
-  IF SCREEN_FLIP_H==1 
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
-  ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2
-  ENDC  
-  call {UpdateByteInTilemap_rotation}
-  ret
-
-
-UpdateOptionBuffer_Undecided2:
-  ret
-
 ;--------------------------------Handover Payloads---------------------------------------------------------
 HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
   .start
@@ -1001,7 +982,7 @@ checker_payload:
   jr nz, :-
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
   ldh a, [joypad_active] ; 3c
-  DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_UP_MASK)
+  DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_DOWN_MASK)
   and a,ROM_RAM_HANDOVER_MASK ; 2c
   cp a, ROM_RAM_HANDOVER_MASK ; 2c
   jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2

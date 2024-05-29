@@ -25,7 +25,7 @@ SidebarArrangementViewfinder:
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
   db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Take photo: B button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_DOWN, PROMPT_SELECT;Cart Handover: 
+  db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_UP, PROMPT_SELECT;Cart Handover: 
   .end
   ASSERT SidebarArrangementViewfinder.end - SidebarArrangementViewfinder <= 52, "SidebarArrangementViewfinder is too large"
 
@@ -114,7 +114,7 @@ MenuHandler_CameraOpts:
     :bit JOYPAD_SELECT, b ;check SELECT
     jr z,:+
     ;Start handover, possibly after waiting for capture to complete
-      bit JOYPAD_DOWN, b
+      bit JOYPAD_UP, b
       jr z,:+
       call StartHandover
 
