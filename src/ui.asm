@@ -368,6 +368,8 @@ InitMenuState_CameraOpts::
   ld hl, SidebarArrangementViewfinder   ;Fill sidebar buffer with new prompts
   call PrepareSidebar
 
+  call SetBGPalette0to0
+
   ret
 
 InitMenuState_Selected:
@@ -391,6 +393,8 @@ InitMenuState_TakeConfirm:
   
   ld hl, SidebarArrangementTakeConfirm   ;Fill sidebar buffer with new prompts
   call PrepareSidebar
+
+  call SetBGPalette0to1
   ret
 
 

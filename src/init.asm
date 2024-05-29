@@ -60,7 +60,8 @@ InitVariables:
   ld [RemoteJoypadPrevState],a
   ld [RemoteJoypadNewPressed],a
   ld [RemoteJoypadActive],a
-  
+  ld [BGPaletteChangeFlag],a
+
   ld a, $01
   ld [ShowPromptsFlag], a
 
@@ -157,12 +158,13 @@ ldh [rOCPS],a ;Set OBJ palette index to 0, auto-increment
 
 .init_palette
   ld  b,NUM_OBJ_PALETTES*$08
-  ld  hl,palette
+  ld  hl,PaletteOBJ
 .palette_loop_obj
   ld  a,[hl+]
   ldh  [rOCPD],a
   dec b
   jr  nz,.palette_loop_obj
+  ld hl,PaletteBG
   ld  b,NUM_BG_PALETTES*$08
 .palette_loop_bg
   ld  a,[hl+]
@@ -179,8 +181,10 @@ InitTilemapAttributes:
 
   ;Set bit 6+5 of each byte in the 32x32 attribute tilemap 1:0x9800-9BFF
   ;Bit 3 controls the VRAM bank the tile is pulled from
-  DEF INIT_TILEMAP_ATTRS EQU SCREEN_FLIP_V<<6 | SCREEN_FLIP_H<<5
-  ld a, INIT_TILEMAP_ATTRS | %00001000; bank 1, flip tiles over X and Y if that's set
+  DEF FLIP_ATTRS EQU SCREEN_FLIP_V<<6 | SCREEN_FLIP_H<<5
+  DEF UI_PALETTE_ID EQU 0
+  DEF CAPTURE_PALETTE_ID EQU 2
+  ld a, FLIP_ATTRS | %00001000 | UI_PALETTE_ID; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 
   ;Top points to VBank1, fills until $9BFF ($99C0-$9BFF will be overwritten later), used for the Window area's buffered captures
@@ -189,7 +193,7 @@ InitTilemapAttributes:
     bit 2, h
     jr z, .FillWithBank1
   ;Now, fill starting at 9A44
-  ld a, INIT_TILEMAP_ATTRS
+  ld a, FLIP_ATTRS | CAPTURE_PALETTE_ID
   ld hl, $9A44
   ld bc, $0010
   .fillCaptureAreaWithBank0: ;add $10 if high nybble of l is odd (bit 4 is set) and if the low nybble has 4 (bit 2)

@@ -65,19 +65,25 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ContrastChangedFlag: db ;When contrast is changed, set this to 1
                         ;May be wise to change this to a CamOptChangedFlags bitfield to check if CamRegs changed, Contrast, Dither Pattern, or Dither Lighting
   ;5 bytes
-  RemoteJoypadHoldThreshold: db
+  RemoteJoypadHoldThreshold: db ;TODO: This is unneccessary. We can just use the regular hold threshold.
   RemoteJoypadHoldCounter: db
   RemoteJoypadState: db
   RemoteJoypadPrevState: db
   RemoteJoypadNewPressed: db
   RemoteJoypadActive: db
+  ;3 bytes
+  BGPaletteChangeSrc: db ; Index of source within the BG palette table (each entry is 8 bytes)
+  BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
+  BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
+  
+
+  
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
   UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
-
-  ;Cumulative $DD bytes
-  ;$22 bytes remaining
+  ;Cumulative $E0 bytes
+  ;$1F bytes remaining
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -171,6 +177,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 
   call DrawValueLines_DMAMethod 
   call DrawSidebar ;TODO inline this
+  call ModifyPalette
 
   ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
@@ -975,9 +982,78 @@ checker_payload:
   DEF HandoverChecker EQU _VRAM
   .start
   ;OAM copy 
+  ; ld a,$d4
+  ; ldh [rDMA],a
+  ; ld a,$10 ;OAM copy waitloop: number of cycles burned = 4*counter- 1
+  ; :dec a
+  ; jr nz, :-
+  ; ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
+  ; ldh a, [joypad_active] ; 3c
+  ; DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_DOWN_MASK)
+  ; and a,ROM_RAM_HANDOVER_MASK ; 2c
+  ; cp a, ROM_RAM_HANDOVER_MASK ; 2c
+  ; jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
+  ; ;Move BGP values into CGB BG palette 0 
+  ; ;We will have 4 color values (Little-endian 555) stored. 0=White, 1:Light Gray, 2:Dark Gray, 3: Black
+  ; ld a, BCPSF_AUTOINC | $00 ;2c2b
+  ; ldh [rBCPS],a   ;Set BCPS address to CGB palette 0, autoincrement ;3c 2b
+  ; ldh a,[rBGP] ;3c 2b
+  ; ld d,a ;Load BGP (33221100) into d ;1c 1b
+  ; ;9c
+
+  ; and a,%00000011 ;2c 2b
+  ; add a,a ; a = 2*BGP[1:0], index in our palette table ;1c 1b
+  ;   ld hl, .stockPaletteData+$8000-checker_payload ;3c3b
+  ;   add a,l ;1c 1b
+  ;   ld l,a ;hl = address in palette table ;1c 1b
+  ;   ld a, [hli] ;2c 1b
+  ;   ldh [rBCPD], a ;3c 1b
+  ;   ld a, [hl] ;2c 1b
+  ;   ldh [rBCPD], a ;load palette data from table into CGB palette ;3c 1b
+  ;   ;18c
+
+  ; sra d ;2c2b
+  ; ld a,d
+  ; and a,%00000110 ;a = 2*BGP[3:2] ;2c2b
+  ;   ld hl, .stockPaletteData+$8000-checker_payload
+  ;   add a,l
+  ;   ld l,a ;hl = address in palette table
+  ;   ld a, [hli]
+  ;   ldh [rBCPD], a
+  ;   ld a, [hl]
+  ;   ldh [rBCPD], a ;load palette data from table into CGB palette
+  ;   ;5+15 = 20c
+
+  ; sra d
+  ; sra d
+  ; ld a,d
+  ; and a,%00000110 ;a = 2*BGP[5:4]
+  ;   ld hl, .stockPaletteData+$8000-checker_payload
+  ;   add a,l
+  ;   ld l,a ;hl = address in palette table
+  ;   ld a, [hli]
+  ;   ldh [rBCPD], a
+  ;   ld a, [hl]
+  ;   ldh [rBCPD], a ;load palette data from table into CGB palette
+  ;   ;22c
+
+  ;   sra d
+  ;   sra d
+  ;   ld a,d
+  ;   and a,%00000110 ;a = 2*BGP[7:6]
+  ;     ld hl, .stockPaletteData+$8000-checker_payload
+  ;     add a,l
+  ;     ld l,a ;hl = address in palette table
+  ;     ld a, [hli]
+  ;     ldh [rBCPD], a
+  ;     ld a, [hl]
+  ;     ldh [rBCPD], a ;load palette data from table into CGB palette
+  ;   ;22c
+  ; ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
+
   ld a,$d4
   ldh [rDMA],a
-  ld a,$0E ;OAM copy waitloop: number of cycles burned = 4*counter- 1
+  ld a,$24 ;OAM copy waitloop
   :dec a
   jr nz, :-
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
@@ -986,63 +1062,6 @@ checker_payload:
   and a,ROM_RAM_HANDOVER_MASK ; 2c
   cp a, ROM_RAM_HANDOVER_MASK ; 2c
   jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
-  ;Move BGP values into CGB BG palette 0 
-  ;We will have 4 color values (Little-endian 555) stored. 0=White, 1:Light Gray, 2:Dark Gray, 3: Black
-  ld a, BCPSF_AUTOINC | $00 ;2c2b
-  ldh [rBCPS],a   ;Set BCPS address to CGB palette 0, autoincrement ;3c 2b
-  ldh a,[rBGP] ;3c 2b
-  ld d,a ;Load BGP (33221100) into d ;1c 1b
-  ;9c
-
-  and a,%00000011 ;2c 2b
-  add a,a ; a = 2*BGP[1:0], index in our palette table ;1c 1b
-    ld hl, .stockPaletteData+$8000-checker_payload ;3c3b
-    add a,l ;1c 1b
-    ld l,a ;hl = address in palette table ;1c 1b
-    ld a, [hli] ;2c 1b
-    ldh [rBCPD], a ;3c 1b
-    ld a, [hl] ;2c 1b
-    ldh [rBCPD], a ;load palette data from table into CGB palette ;3c 1b
-    ;18c
-
-  sra d ;2c2b
-  ld a,d
-  and a,%00000110 ;a = 2*BGP[3:2] ;2c2b
-    ld hl, .stockPaletteData+$8000-checker_payload
-    add a,l
-    ld l,a ;hl = address in palette table
-    ld a, [hli]
-    ldh [rBCPD], a
-    ld a, [hl]
-    ldh [rBCPD], a ;load palette data from table into CGB palette
-    ;5+15 = 20c
-
-  sra d
-  sra d
-  ld a,d
-  and a,%00000110 ;a = 2*BGP[5:4]
-    ld hl, .stockPaletteData+$8000-checker_payload
-    add a,l
-    ld l,a ;hl = address in palette table
-    ld a, [hli]
-    ldh [rBCPD], a
-    ld a, [hl]
-    ldh [rBCPD], a ;load palette data from table into CGB palette
-    ;22c
-
-    sra d
-    sra d
-    ld a,d
-    and a,%00000110 ;a = 2*BGP[7:6]
-      ld hl, .stockPaletteData+$8000-checker_payload
-      add a,l
-      ld l,a ;hl = address in palette table
-      ld a, [hli]
-      ldh [rBCPD], a
-      ld a, [hl]
-      ldh [rBCPD], a ;load palette data from table into CGB palette
-    ;22c
-  ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
 
   xor a   ;a must be zero on return to allow the HRAM code to switch back to VRAM bank 0
   jp HRAM_RETURN_POINT
@@ -1370,6 +1389,59 @@ CheckSerial:
   ld [RemoteJoypadActive],a
   ret
 
+
+  ;arg hl: address of palette data
+  ;arg a: address in palette data to start loading into (palette number * 2*4), plus bit 7 set (auto-increment)
+  ;clobbers b,a,hl
+  ;BCPD can't be accessed during mode 3
+LoadPaletteFromAddress:
+  ldh [rBCPS],a ;3c
+  ld b,$08 ;2c
+  :ld a,[hli] ;2c
+  ldh [rBCPD],a ;3c
+  dec b ;1c
+  jr nz,:- ;3c
+  ret
+
+SetBGPalette0to1::
+  ld a,(1*8)
+  ld [BGPaletteChangeSrc],a
+  ld a, %10000000 | $00
+  ld [BGPaletteChangeDest],a
+  cpl
+  ld [BGPaletteChangeFlag],a
+  ret
+
+SetBGPalette0to0::
+  ld a,(0*8)
+  ld [BGPaletteChangeSrc],a
+  ld a, %10000000 | $00
+  ld [BGPaletteChangeDest],a
+  cpl
+  ld [BGPaletteChangeFlag],a ;set flag so that palette is changed in VBlank
+  ret
+
+
+;Clobbers a,de,hl
+ModifyPalette:
+  ld a,[BGPaletteChangeFlag] ;If flag is unset, do nothing
+  and a
+  ret z
+  xor a
+  ld [BGPaletteChangeFlag],a ;If flag is set, reset it and load the palette
+  ld a,[BGPaletteChangeSrc] ;add the src index (which should be passed as 8*palette index) to the address of the palette table.
+  ld hl, PaletteBG
+  ld d, 0
+	ld e, a
+	add hl, de
+  ld a,[BGPaletteChangeDest] ;This should be the value passed to rBCPS, with bit 7 (auto-increment) set and the lower 6 bits set to palette number * 8
+  ldh [rBCPS],a ;3c
+  ld b,$08 ;2c
+  :ld a,[hli] ;2c
+  ldh [rBCPD],a ;3c
+  dec b ;1c
+  jr nz,:- ;3c
+ret
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 
@@ -1383,6 +1455,14 @@ gfxActions_storage:
     incbin "assets/actions.1bpp",0,128
 gfxObjects0_storage:
     incbin "assets/objects0.1bpp",0,128
+Palette:
+PaletteBG:
+PaletteOBJ:
+    ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
+    ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
+    ;In the bin file, specify in RGB555: (dont-care/0):Blue5:Green5:Red5
+    INCBIN "assets/palette.bin"
+
 ;Constant values space
 ; ;define the SelectedOptionsEntry struct
 ; RSRESET
@@ -1485,12 +1565,6 @@ ELIF SCREEN_FLIP_H==1 && SCREEN_FLIP_V==1
 ;  db $FF,$20,$10,$FF,$80,$FF,$FF,$40,$A0,$FF,$FF,$90,$FF,$60,$50,$FF
 ;  db $01,$FF,$FF,$02,$FF,$04,$08,$FF,$FF,$00,$00,$FF,$00,$FF,$FF,$00
 ENDC
-
-palette:
-  ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
-  ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
-  ;In the bin file, specify in RGB555: (dont-care/0):Blue5:Green5:Red5
-  INCBIN "assets/palette.bin"
 
 EndRAM0:
     assert EndRAM0 < WRAM_Var_Area0, "Code is outside of $D000-$100stack-$78 OAMtemp - variables area."
