@@ -187,25 +187,50 @@ InitTilemapAttributes:
   ld a, FLIP_ATTRS | %00001000 | UI_PALETTE_ID; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 
-  ;Top points to VBank1, fills until $9BFF ($99C0-$9BFF will be overwritten later), used for the Window area's buffered captures
+  ;Top points to VBank1, fills until $9BFF ($99C0-$9BFF will be overwritten later), used for the UI
   .FillWithBank1:
     ld [hli], a
     bit 2, h
     jr z, .FillWithBank1
-  ;Now, fill starting at 9A44
+
+  .InitHorizontalUIPalette
+  ;Alternate topbar palettes
+  ld bc,$050C ;b is inline counter -- number of 4-tile groups you've gone through
+  ld d,2 ;inner line counter --when this is 0, reset to 2 and switch color palettes
+  ld e,4 ;outer line counter -- when this is 0, terminate
+  ld hl,TILEMAP_UI_ORIGIN_H
+  ;Last tile 9A33 (end if next tile is 9A34), a size of $74
+  ;20 groups of 4, switching oddness after the first 10
+  .fill4
+  ld[hli],a
+  ld[hli],a
+  ld[hli],a
+  ld[hli],a
+  xor a,$01
+  dec b
+  jr nz,.fill4 ;if we've filled a line of 5x4 tiles, jump $10 to next line. If not, fill another 4
+  add hl,bc ;jump to next line
+  ld b,5 ;reset inline counter
+  xor a,$01
+  dec d
+  jr nz,:+
+  ld d,2 ;if inner line counter=0, reset it and flip the palette
+  xor a,$01
+  :dec e
+  jr nz,.fill4 
+
+  ;Now, fill starting at 9A44 (capture area)
   ld a, FLIP_ATTRS | CAPTURE_PALETTE_ID
   ld hl, $9A44
-  ld bc, $0010
-  .fillCaptureAreaWithBank0: ;add $10 if high nybble of l is odd (bit 4 is set) and if the low nybble has 4 (bit 2)
-  ;TODO a basic counter using a register would probably be more efficient and flexible
-    ld [hli], a
-    bit 4, l
-    jr z,:+
-    bit 2, l
-    jr z,:+
-    add hl, bc ;add $10 to hl
-    :bit 2, h
-    jr z, .fillCaptureAreaWithBank0
+  ld bc, $1010 ; b can be a countdown to jumping a half-line, as long as it is 0 when we jump.
+  .fillCaptureAreaWithBank0
+    ld [hli], a ;2c 1b
+    dec b ;end-of-line counter ;1c 1b
+    jr nz,:+ ;3c 2b
+    add hl, bc ;add $10 (half-line) to hl (dest) if bit 2 and 4 are set (bit 4 set signals right side of the tilemap, bit 2 set is that+4) ;2c1b
+    ld b,c ;1c 1b
+    :bit 2, h ;2c 2b
+    jr z, .fillCaptureAreaWithBank0 ;3c 2b  
 
 LoadButtonTiles:
 
