@@ -21,9 +21,9 @@ ChangeOptionHandler_table:
 SidebarArrangementViewfinder:
   db (SidebarArrangementViewfinder.end - SidebarArrangementViewfinder) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_MODIFY, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Modify: A button
+  db ACTION_MODIFY, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Modify: B button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Take photo: B button
+  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Take photo: A button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
   db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_UP, PROMPT_SELECT;Cart Handover: 
   .end
@@ -39,10 +39,10 @@ ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, 
 SidebarArrangementTakeConfirm:
   db (SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Confirm: B button
+  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Confirm: A button
 
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A;Cancel: A button
+  db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Cancel: B button
   .end
 
   ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
@@ -118,11 +118,11 @@ MenuHandler_CameraOpts:
       jr z,:+
       call StartHandover
 
-    :bit JOYPAD_B, b; check B - take picure
+    :bit JOYPAD_A, b; check A - take picure
     jr z,:+
       call InitMenuState_TakeConfirm
       jp .end ; don't check for b button if we pressed a -- only one state transition at once.
-    :bit JOYPAD_A, b ;check A - select a value to change
+    :bit JOYPAD_B, b ;check B - select a value to change
     jr z, :+
         ;transition to state "selected"
         call InitMenuState_Selected
@@ -141,22 +141,6 @@ MenuHandler_Selected:
   and a, (JOYPAD_UP_MASK | JOYPAD_DOWN_MASK)
   ;Do separate checks for Up/Down (11xxxxxx) and L/R (xx11xxxx)
   jp z, .dpad_updown_end 
-
-    ;Either down or up is pressed
-    ;HL = SelectedAddrTable[MENU_POSITION]
-    ;In real pointers, that's SelectedAddrTable + (MENU_POSITION<<1)
-    ld hl, SelectedAddrTable ;3c 3b
-    ldh a, [MENU_POSITION] ;3c 2b
-    and a, $0F ;2c 2b
-    add a,a ;1c 1b
-    ld e,a ;1c 1b
-    ld d,$00 ;2c 2b
-    add hl, de ;2c 1b
-    ;dereference hl and hl+1 into hl, without messing with b. a-cde are safe to change
-    ld a,[hli] ;2c 1b
-    ld h,[hl] ;2c 1b
-    ld l,a ;1c 1b
-    push hl ;4c 1b
 
     bit JOYPAD_DOWN, b
     jp z, .up_pressed
@@ -177,6 +161,8 @@ MenuHandler_Selected:
 
     .mod_nybble:
     ;make sure not to modify B, or C or HL if calling mod_nybble. however, we need to use hl for jp. so push hl instead and have ModifyNybble pop it off stack
+    ;We don't need to preserve B before calling one of the value modifiers, only C. HL is used to jump
+
     ld hl, ChangeOptionHandler_table
     ldh a, [MENU_POSITION]
     and a, $0F
@@ -202,7 +188,7 @@ MenuHandler_Selected:
   ldh a,[MENU_NYBBLE]
   and a, $0F ; modify LOW(current) nybble of MENU_NYBBLE
   bit JOYPAD_LEFT, b
-  jp z,.right_pressed ;Check LEFT
+  jr z,.right_pressed ;Check LEFT
   ;Change nybble number, then move it within range if it goes outside of it
   ;By the end of this, the correct value for our new nybble position (%000000ab) will be in c
   .left_pressed:
@@ -266,8 +252,8 @@ MenuHandler_TakeConfirm:
 
   ldh a, [joypad_active]
   .check_a:
-  bit JOYPAD_B, a
-  jp z, .check_b ;check A BUTTON
+  bit JOYPAD_A, a
+  jp z, .check_b ;jump to check B BUTTON
   ;A button pressed: save picture to free slot, then go back to the previous menu state.
   ;Save picture to free slot (saving to free slot assumed there exists a free slot and will fail silently -- check for free space before entering this menu)
 
@@ -319,7 +305,7 @@ MenuHandler_TakeConfirm:
 
   .check_b: ; check B BUTTON
   ldh a, [joypad_active]
-  bit JOYPAD_A,a
+  bit JOYPAD_B,a
   jp z,.no_buttons_pressed   ;B button pressed: go back to previous menu state without saving capture.
 
   ;This should be jumped to if either A or B is pressed
@@ -473,19 +459,51 @@ ModifyNybble::
   :add a, [hl] ;add or subtract 1 from the selected nybble
   ld [hl], a ;write it back
   
-  call GetMin_ConfigVal ;bounds check
-  cp a, [hl]
-  jr c, :+
-  jr z, :+
-  ld [hl], a ;write min value to byte
-  jr :++ ; skip max check if you've already hit min
-  
-  :call GetMax_ConfigVal
-  cp a, [hl]
-  jr nc, :+
-  jr z, :+
-  ld [hl], a ;write max value to byte
-  :
+  push af ;We don't really need the new value pushed here: it's in [hl]. We need the flags to check for overflow/underflow.
+  ld a,$01
+  cp a,c
+  jr z, .increment_check; if this was called to increment
+  .decrement_check;decrement
+  pop af ;check for underflow
+  jr c, .noUnderflow
+  .underflow   ;if underflow occurred, get max, add 1, add it into [hl]
+    call GetMax_ConfigVal
+    inc a
+    add a,[hl]
+    ld [hl],a
+    ret
+  .noUnderflow ;if no underflow, check if new value < min. If it is, add max-min.
+    call GetMin_ConfigVal
+    sub a,[hl] ;if c or z, [hl]>=min (do nothing)
+    ret c
+    ret z
+    ;if no carry, a = min - newval, and we need to sub max
+    ld c,a 
+    call GetMax_ConfigVal
+    sub a, c ;a = newval -min +max
+    inc a ;newval - min + max + 1
+    ld [hl], a  
+    ret
+  .increment_check
+  pop af ;check for overflow
+  jr nc, .noOverflow
+  .overflow ;if overflow occurred, val_new+=min
+    call GetMin_ConfigVal
+    add a,[hl]
+    ld [hl],a
+    ret
+  .noOverflow ;if no overflow, check whether new value > max. If so, add min-max
+  call GetMax_ConfigVal
+  sub a, [hl] ;nc or z, [hl]<=max
+  ret nc
+  ret z
+  ;if c and not z, a = newval + min-max. We already subtracted max, so we need to add min to a and write it back
+  ;a = -(newval - max). We can subtract it from min to make a = min + newval - max
+  ld c,a
+  call GetMin_ConfigVal
+  sub a,c ; newval + min - max - 1
+  dec a
+  ld [hl], a
   ret
 
 ;Gets the minimum allowable value for a byte based on MENU_POSITION and returns it in A
@@ -523,12 +541,43 @@ Dec_nybble_position_a_into_c:
   ;Dec r8 doesn't have an overflow flag, only Z, so we'll need to sub $01
   ;Carry check only works if we cleared out higher bits -- decrementing from %1000 0000 will cause the higher nybble to change without an overflow set
   sub a, $01
-  jr nc, :+
-  xor a ; if a went below 0, set it back to 0
-  :ld c,a
+  jr nc, .inBounds
+  .outOfBounds
+  ldh a,[MENU_POSITION]
+  and a,$0F
+  IF SCREEN_FLIP_H
+    sub a,$01
+    jr nc,:+
+    ld a,$09
+    :
+  ELSE
+    inc a ;increment MENU_POSITION
+    cp a,$0A ;if out of right side, set to $90
+    jr nz,:+
+    ld a,$90
+    :
+  ENDC
+  ;load new MENU_POSITION into memory(old:new)
+  ld c,a
+  ldh a,[MENU_POSITION]
+  swap a
+  and a,$F0
+  or a,c
+  ldh [MENU_POSITION],a
+  ; set return value (new MENU_NYBBLE value) to the most significant nybble acceptable for new MENU_POSITION
+  ;add LOW(a) to SelectedMaxNybblesTable to get SelectedMaxNybblesTable[MENU_POSITION]
+  ld hl, SelectedMaxNybblesTable
+  and a, $0F
+  ld d,$00
+  ld e, a
+  add hl, de ; HL is now &SelectedMaxNybblesTable[MENU_POSITION]
+  ld a,[hl] ; a = max nybble position
+ 
+  .inBounds
+  ld c,a
   ret
 
-;Changes MENU_NYBBLE and does bound-checking to ensure MENU_NYBBLE is only on valid nybbles
+;Changes MENU_NYBBLE/MENU_POSITION and does bound-checking to ensure MENU_NYBBLE is only on valid nybbles
 Inc_nybble_position_a_into_c:
   inc a ;Inc MENU_NYBBLE
   ;Check whether it goes over the maximum allowed nybble position for this menu option
@@ -542,57 +591,78 @@ Inc_nybble_position_a_into_c:
   add hl, de ; HL is now &SelectedMaxNybblesTable[MENU_POSITION]
   ld a,[hl] ; a = max nybble position
   cp a, c ;carries if c>a (tentative is greater than max) -- out-of-bounds
-  jr nc, :+     ; At the end of this, reg c will contain the nybble position to write back
-  ld c,a ; If there was a carry, we need to set c to a -- our max value
-  :ret ;Otherwise, we can leave c, as it is within bounds 
+  jr nc, .inbounds     ; At the end of this, reg c will contain the nybble position to write back
+  .outOfBounds 
+    ldh a,[MENU_POSITION]
+    and a,$0F
+    IF SCREEN_FLIP_H
+    inc a ;increment MENU_POSITION
+    ;if it's greater than the max MENU_POSITION
+    cp a,$0A
+    jr nz,:+
+    ld a,$90 ;last menu position 9, current menu position 0
+    :
+    ELSE
+    sub a,$01 ;decrement MENU_POSITION
+    jr nc, :+;if you just went to FF (carry), set it to the last menu item
+    ld a,$09 ;last menu position 0, current 9
+    :
+    ENDC
+    ;Load old:new menu position into a, then write it back
+    ld c,a
+    ldh a,[MENU_POSITION]
+    and a,$0F
+    swap a
+    or a,c
+    ldh [MENU_POSITION],a
+    xor a
+    ld c,a ; If there was a carry, we need to set c to 0
+  .inbounds
+  ret ;Otherwise, we can leave c, as it is within bounds 
 
 ModifyCamOptN_UI:
-  pop hl ;we pushed hl 
-  call ModifyNybble
-  jp MenuHandler_Selected.modifyValueTail
-ModifyCamOptVH_UI:
-  pop hl
+  ld hl,CamOptN_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptC_UI: 
-  pop hl
+  ld hl,CamOptC_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptO_UI:
-  pop hl
+  ld hl,CamOptO_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptG_UI:
-  pop hl
+  ld hl,CamOptG_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptE_UI:
-  pop hl
+  ld hl,CamOptE_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptV_UI:
-  pop hl
+  ld hl,CamOptV_RAM
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyContrast_UI:
-  ;Set dither table modified flag
-  pop hl
+  ;TODO: Set dither table modified flag
+  ld hl,CamOptContrast
   call ModifyNybble
   ;TODO switch to the appropriate ROM bank holding the dither bases
   call PrepareDitherPattern
   jp MenuHandler_Selected.modifyValueTail
 ModifyDitherTable_UI:
-  pop hl
+  ld hl, CamOptDitherTable
   call ModifyNybble
   ;TODO switch to the appropriate ROM bank holding the dither bases
   call PrepareDitherPattern
   jp MenuHandler_Selected.modifyValueTail
 ModifyDitherPattern_UI:
-  pop hl
+  ld hl,CamOptDitherPattern
   call ModifyNybble
   jp MenuHandler_Selected.modifyValueTail
 ModifyEdgeMode_UI:
-  pop hl
+  ld hl,CamOptEdgeMode
   call ModifyNybble
   ;Modify working N/VH registers based off the value in EdgeControlModes[CamOptEdgeMode]
   call SetNVHtoEdgeMode

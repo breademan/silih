@@ -61,9 +61,11 @@ InitVariables:
   ld [RemoteJoypadNewPressed],a
   ld [RemoteJoypadActive],a
   ld [BGPaletteChangeFlag],a
-
+  ldh [VBlank_AnimationCounter],a
+  
   ld a, $01
   ld [ShowPromptsFlag], a
+
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
 BackupBank0:
@@ -196,8 +198,8 @@ InitTilemapAttributes:
   .InitHorizontalUIPalette
   ;Alternate topbar palettes
   ld bc,$050C ;b is inline counter -- number of 4-tile groups you've gone through
-  ld d,2 ;inner line counter --when this is 0, reset to 2 and switch color palettes
-  ld e,4 ;outer line counter -- when this is 0, terminate
+  ld de,$0204 ;d = inner line counter --when this is 0, reset to 2 and switch color palettes
+              ;e = outer line counter -- when this is 0, terminate
   ld hl,TILEMAP_UI_ORIGIN_H
   ;Last tile 9A33 (end if next tile is 9A34), a size of $74
   ;20 groups of 4, switching oddness after the first 10

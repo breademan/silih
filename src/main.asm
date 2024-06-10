@@ -24,18 +24,19 @@ ENDU
 ;8 bytes
 CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptVH_RAM: db
-  CamOptC_RAM: ;CamOptC_RAM is stored in little-endian order, inconsistent with the CAM registers, but easily updated by modify_nybble
+  CamOptC_RAM:: ;CamOptC_RAM is stored in little-endian order, inconsistent with the CAM registers, but easily updated by modify_nybble
     CamOptC_RAM_L: db 
     CamOptC_RAM_H: db
-  CamOptO_RAM: db
-  CamOptG_RAM: db
-  CamOptE_RAM: db
-  CamOptV_RAM: db
+  CamOptO_RAM:: db
+  CamOptG_RAM:: db
+  ;E (first entry of 2nd row) is technically 4 bits, but setting E3 does edge extraction, we'd have to set Z to 0 for that, and I can't imagine anyone would use it.
+  CamOptE_RAM:: db
+  CamOptV_RAM:: db
   ;Non-CAM-register manual config options: 4 bytes
-  CamOptContrast: db ; 0-F
-  CamOptDitherTable: db ;selects whether to use light or dark dither table. 0=light (sramA:7c20), 1=dark (sramA:7c60)
-  CamOptDitherPattern: db
-  CamOptEdgeMode: db ;Meta-option that modifies NVH
+  CamOptContrast:: db ; 0-F
+  CamOptDitherTable:: db ;selects whether to use light or dark dither table. 0=light (sramA:7c20), 1=dark (sramA:7c60)
+  CamOptDitherPattern:: db
+  CamOptEdgeMode:: db ;Meta-option that modifies NVH
   ;These variables are downstream of the above individual CamOpt variables. UpdateCameraOpts uses these contiguously and with CamOptDither_RAM, so they must be contiguous
   ; 5 + 48 bytes
   CamOptA001_RAM: db
@@ -141,13 +142,46 @@ Viewfinder_jp_table:
 
 VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ;Because we are jumping from the ROM's vblank ISR, we lose 22 cycles to PUSHesx4 and call to+jp from HRAM
-
   pop bc ;the top of the stack is the address of the ROM's VBlank ISR. Since we don't want to return to it, we pop it off the stack and don't use it.
   
+  ldh a,[VBlank_AnimationCounter]
+  inc a
+  ldh [VBlank_AnimationCounter], a
+
   ;cursor transparency effect: alternate cursor sprite blank(Vbank1)->white(Vbank0) every other frame. The sprite has the same ID, just different banks. 
+  ;to deal with extra colors, instead of moving it every frame, change its sprite every frame from (dark+transparent) to (light+transparent)
+  ;We could create some frame counters to do looping animations and such with VBlank_AnimationCounter.
+  ;Vblank_Sidebar_DrawLine could also be used
+  ;animation order:
+  ;sprite0+palette0
+  ;sprite1+palette0
+  ;sprite1+palette1 --simpler if we set to sprite 0
+  ;sprite0+palette1 --simpler if we set to sprite 1
+  DEF CURSOR_SPRITE_0 EQU 2
+  DEF CURSOR_SPRITE_1 EQU 3
+  DEF CURSOR_PALETTE_0 EQU 0
+  DEF CURSOR_PALETTE_1 EQU 1
+
+  .periodFourCheck
+  bit 1,a
+  jr nz,.periodFourNotSet
+  .periodFourSet
+    ld a, [OAM_Work_Area+3] ; 4c3b
+    and a,%11111000;2c2b ;set palette to cursor palette 1
+    or a,CURSOR_PALETTE_1
+    ld [OAM_Work_Area+3], a
+  jr .periodFourEnd 
+  .periodFourNotSet
+  ld a, [OAM_Work_Area+3] ; 4c3b
+  and a,%11111000;2c2b ;set palette to cursor palette 0
+  or a,CURSOR_PALETTE_0
+  ld [OAM_Work_Area+3], a
+
+  .periodFourEnd
   ld a, [OAM_Work_Area+2] ;+4c3b
   xor a, %00000001 ;2c2b
   ld [OAM_Work_Area+2], a ;+4c3b
+
 
   ;If we have few objects, instead of transferring the entire OAM, we can just modify the position (2bytes) or entirety (4bytes) of a small number of hardcoded ones.
   .OAM_Transfer:
@@ -981,81 +1015,69 @@ CompleteHandover_storage:
 checker_payload:
   DEF HandoverChecker EQU _VRAM
   .start
-  ;OAM copy 
-  ; ld a,$d4
-  ; ldh [rDMA],a
-  ; ld a,$10 ;OAM copy waitloop: number of cycles burned = 4*counter- 1
-  ; :dec a
-  ; jr nz, :-
-  ; ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
-  ; ldh a, [joypad_active] ; 3c
-  ; DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_DOWN_MASK)
-  ; and a,ROM_RAM_HANDOVER_MASK ; 2c
-  ; cp a, ROM_RAM_HANDOVER_MASK ; 2c
-  ; jr z, .handoverToRAM ;2 or 3c -- for minimum, it's 2
-  ; ;Move BGP values into CGB BG palette 0 
-  ; ;We will have 4 color values (Little-endian 555) stored. 0=White, 1:Light Gray, 2:Dark Gray, 3: Black
-  ; ld a, BCPSF_AUTOINC | $00 ;2c2b
-  ; ldh [rBCPS],a   ;Set BCPS address to CGB palette 0, autoincrement ;3c 2b
-  ; ldh a,[rBGP] ;3c 2b
-  ; ld d,a ;Load BGP (33221100) into d ;1c 1b
-  ; ;9c
-
-  ; and a,%00000011 ;2c 2b
-  ; add a,a ; a = 2*BGP[1:0], index in our palette table ;1c 1b
-  ;   ld hl, .stockPaletteData+$8000-checker_payload ;3c3b
-  ;   add a,l ;1c 1b
-  ;   ld l,a ;hl = address in palette table ;1c 1b
-  ;   ld a, [hli] ;2c 1b
-  ;   ldh [rBCPD], a ;3c 1b
-  ;   ld a, [hl] ;2c 1b
-  ;   ldh [rBCPD], a ;load palette data from table into CGB palette ;3c 1b
-  ;   ;18c
-
-  ; sra d ;2c2b
-  ; ld a,d
-  ; and a,%00000110 ;a = 2*BGP[3:2] ;2c2b
-  ;   ld hl, .stockPaletteData+$8000-checker_payload
-  ;   add a,l
-  ;   ld l,a ;hl = address in palette table
-  ;   ld a, [hli]
-  ;   ldh [rBCPD], a
-  ;   ld a, [hl]
-  ;   ldh [rBCPD], a ;load palette data from table into CGB palette
-  ;   ;5+15 = 20c
-
-  ; sra d
-  ; sra d
-  ; ld a,d
-  ; and a,%00000110 ;a = 2*BGP[5:4]
-  ;   ld hl, .stockPaletteData+$8000-checker_payload
-  ;   add a,l
-  ;   ld l,a ;hl = address in palette table
-  ;   ld a, [hli]
-  ;   ldh [rBCPD], a
-  ;   ld a, [hl]
-  ;   ldh [rBCPD], a ;load palette data from table into CGB palette
-  ;   ;22c
-
-  ;   sra d
-  ;   sra d
-  ;   ld a,d
-  ;   and a,%00000110 ;a = 2*BGP[7:6]
-  ;     ld hl, .stockPaletteData+$8000-checker_payload
-  ;     add a,l
-  ;     ld l,a ;hl = address in palette table
-  ;     ld a, [hli]
-  ;     ldh [rBCPD], a
-  ;     ld a, [hl]
-  ;     ldh [rBCPD], a ;load palette data from table into CGB palette
-  ;   ;22c
-  ; ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
-
+  ; OAM copy 
   ld a,$d4
   ldh [rDMA],a
-  ld a,$24 ;OAM copy waitloop
+  ld a,$10 ;OAM copy waitloop: number of cycles burned = 4*counter- 1
   :dec a
   jr nz, :-
+  ;Move BGP values into CGB BG palette 0 
+  ;We will have 4 color values (Little-endian 555) stored. 0=White, 1:Light Gray, 2:Dark Gray, 3: Black
+  ld a, BCPSF_AUTOINC | $00 ;2c2b
+  ldh [rBCPS],a   ;Set BCPS address to CGB palette 0, autoincrement ;3c 2b
+  ldh a,[rBGP] ;3c 2b
+  ld d,a ;Load BGP (33221100) into d ;1c 1b
+  ;9c
+
+  and a,%00000011 ;2c 2b
+  add a,a ; a = 2*BGP[1:0], index in our palette table ;1c 1b
+    ld hl, .stockPaletteData+$8000-checker_payload ;3c3b
+    add a,l ;1c 1b
+    ld l,a ;hl = address in palette table ;1c 1b
+    ld a, [hli] ;2c 1b
+    ldh [rBCPD], a ;3c 1b
+    ld a, [hl] ;2c 1b
+    ldh [rBCPD], a ;load palette data from table into CGB palette ;3c 1b
+    ;18c
+
+  sra d ;2c2b
+  ld a,d
+  and a,%00000110 ;a = 2*BGP[3:2] ;2c2b
+    ld hl, .stockPaletteData+$8000-checker_payload
+    add a,l
+    ld l,a ;hl = address in palette table
+    ld a, [hli]
+    ldh [rBCPD], a
+    ld a, [hl]
+    ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;5+15 = 20c
+
+  sra d
+  sra d
+  ld a,d
+  and a,%00000110 ;a = 2*BGP[5:4]
+    ld hl, .stockPaletteData+$8000-checker_payload
+    add a,l
+    ld l,a ;hl = address in palette table
+    ld a, [hli]
+    ldh [rBCPD], a
+    ld a, [hl]
+    ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;22c
+
+    sra d
+    sra d
+    ld a,d
+    and a,%00000110 ;a = 2*BGP[7:6]
+      ld hl, .stockPaletteData+$8000-checker_payload
+      add a,l
+      ld l,a ;hl = address in palette table
+      ld a, [hli]
+      ldh [rBCPD], a
+      ld a, [hl]
+      ldh [rBCPD], a ;load palette data from table into CGB palette
+    ;22c
+  ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
   ldh a, [joypad_active] ; 3c
   DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_DOWN_MASK)
@@ -1507,14 +1529,7 @@ SelectedMaxTable::
     db \5
   ENDM
 INCLUDE "src/ui_elements.inc"
-;E (first entry of 2nd row) is technically 4 bits, but setting E3 does edge extraction, we'd have to set Z to 0 for that, and I can't imagine anyone would use it.
-SelectedAddrTable:: ;holds the addresses of the WRAM variables for each camera register
-  MACRO X
-    dw \1
-  ENDM
-INCLUDE "src/ui_elements.inc"
-;dw CamOptEdgeMode, CamOptVH_RAM, CamOptC_RAM, CamOptO_RAM, CamOptG_RAM
-;dw CamOptE_RAM, CamOptV_RAM, CamOptContrast, CamOptDitherTable, CamOptDitherPattern
+
 
 ;Must not crrss byte-address boundary
 EdgeControlModes::
