@@ -492,7 +492,7 @@ call UpdateCameraOpts
   
 ld a, UI_RAMBANK
 ldh [rSVBK],a
-call InitMenuState_CameraOpts
+call InitMenuState_Selected
 
 ;TEST trampoline caller
 ;Switch bank to caller's bank

@@ -32,7 +32,9 @@ SidebarArrangementViewfinder:
 SidebarArrangementSelected:
   db (SidebarArrangementSelected.end - SidebarArrangementSelected) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-  db ACTION_OK, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Confirm: B button
+  db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A ;Take photo: A button
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_UP, PROMPT_SELECT;Cart Handover: select+up
   .end
 ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
 
@@ -220,22 +222,31 @@ MenuHandler_Selected:
   and a, (JOYPAD_START_MASK | JOYPAD_SELECT_MASK |JOYPAD_B_MASK | JOYPAD_A_MASK)
 
   jp z, .no_buttons_pressed
+  ldh a, [joypad_active]
   ld b,a
   bit JOYPAD_START, b ;check start
   jp z, .check_select
 
   .check_select:
   bit JOYPAD_SELECT, b
-  jp z, .check_a
+  jr z, .check_a
+  ;Start handover, possibly after waiting for capture to complete
+    bit JOYPAD_UP, b
+    jr z,.check_a
+    call StartHandover
+    jp .buttons_end
 
   .check_a:
-  bit JOYPAD_B, b
-  jp z, .check_b
-  call InitMenuState_CameraOpts
+  bit JOYPAD_A,b
+  jp z,.check_b
+  call InitMenuState_TakeConfirm
+  jp .buttons_end ;we don't want to do any other state transitions if we transition to CameraOpts, so skip the other button checks
 
   .check_b:
-  bit JOYPAD_A,b
-  jp z,.buttons_end
+  bit JOYPAD_B, b
+  jp z, .buttons_end
+  ;call InitMenuState_CameraOpts
+  jp .buttons_end ;we don't want to do any other state transitions if we transition to CameraOpts, so skip the other button checks
 
   .buttons_end:
 
@@ -313,7 +324,7 @@ MenuHandler_TakeConfirm:
   ;undraw the UI for this and return it to whatever it was
 
   ;change the menustate
-  call InitMenuState_CameraOpts
+  call InitMenuState_Selected
   .no_buttons_pressed:
 
 jp HandleInputDone
@@ -358,7 +369,7 @@ InitMenuState_CameraOpts::
 
   ret
 
-InitMenuState_Selected:
+InitMenuState_Selected::
   ld a, MENU_STATE_SELECTED
   ldh [MENU_STATE], a
   xor a
@@ -367,6 +378,7 @@ InitMenuState_Selected:
 
   ld hl, SidebarArrangementSelected   ;Fill sidebar buffer with new prompts
   call PrepareSidebar  
+  call SetBGPalette0to0
   ret
 
 InitMenuState_TakeConfirm:
