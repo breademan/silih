@@ -62,6 +62,8 @@ InitVariables:
   ld [RemoteJoypadActive],a
   ld [BGPaletteChangeFlag],a
   ldh [VBlank_AnimationCounter],a
+  ldh [MENU_NYBBLE],a
+  ldh [MENU_POSITION],a
   
   ld a, $01
   ld [ShowPromptsFlag], a

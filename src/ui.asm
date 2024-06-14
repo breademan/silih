@@ -372,8 +372,32 @@ InitMenuState_CameraOpts::
 InitMenuState_Selected::
   ld a, MENU_STATE_SELECTED
   ldh [MENU_STATE], a
-  xor a
+  ;make sure MENU_POSITION is within range
+  ldh a,[MENU_POSITION]
+  and a,$0F
+  cp a,$09
+  jr c,:+ ; if carry, it's within range. Else 
+  ld a, $09
+  ldh [MENU_POSITION],a
+  :
+
+  ;make sure MENU_NYBBLE is within range by checking SelectedMaxNybblesTable[MENU_POSITION] and aliasing to it
+  ldh a,[MENU_NYBBLE]
+  and a,$0F
+  ld c,a ;C = current menu nybble
+
+  ld hl, SelectedMaxNybblesTable
+  ldh a,[MENU_POSITION]
+  and a,$0F
+  add a,l
+  ld l,a
+  ld a, [hl]
+  cp a,c ;a -c :  max nybble position - menu_nybble -- carry if out-of-bounds, no carry if in-bounds
+  jr nc,:+   ;load max nybble position into LSN of MENU_NYBBLE
+  swap c ; c = old4:0000, a = 0000:max nybble position
+  or a,c
   ldh [MENU_NYBBLE], a
+  :
   call MoveCursorSpriteToSelectedNybble
 
   ld hl, SidebarArrangementSelected   ;Fill sidebar buffer with new prompts
