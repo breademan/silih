@@ -23,10 +23,9 @@ Download the appropriate release from our [releases page](https://github.com/bre
 When you see the screen that says "Press A to play," carefully remove the flash cart, insert your Game Boy Camera cart, and press any button. 
 If for some reason you want to run it in an emulator, only some emulators support both the Game Boy Camera AND yanking Game Paks while the game is running. BGB or Sameboy are recommended.
 
-## Controls (subject to change because they're terrible)
-- __A__: Change an option. Pressing B will let you exit the menu.
-- __B__: Take a photo. Once the viewfinder has stopped changing, pressing B again will save the picture, and pressing A will discard it.
-- __SELECT+UP__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+DOWN. 
+## Controls
+- __A__: Take a photo. Once the viewfinder has stopped changing, pressing B again will save the picture, and pressing A will discard it.
+- __Select+Up__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+DOWN. 
 
 ## Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.
