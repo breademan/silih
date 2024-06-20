@@ -356,7 +356,10 @@ DMAHandler:
   .pausecapture
   ;Draw the capture confirm UI here too. If we draw it immediately upon pressing the button, the user won't have any indication of which picture they're saving 
   ;Also, we should not accept input in the menu handler if Viewfinder state is not VF_PAUSED - this means it hasn't finished capturing the current image yet
-  ;I think users might expect the button to capture the photo they SEE when they pressed it -- currently it's showing the next capture after the user pressed a button.
+  ;TODO: users expect the button to capture the photo they SEE when they pressed it -- currently it's showing the next capture after the user pressed a button.
+  ;Since we're doing tearing, this is not usually possible -- if the user pressed it during CAPTURING, we can check for this and set state to VF_STATE_PAUSED 
+  ;Without initiating a DMA transfer.
+  ;But if it was pressed during DMA transfer, the user must wait until the DMA transfer is done.
   ld a,VF_STATE_PAUSED
   ldh [viewfinder_state],a
   jp ViewfinderChecks
@@ -1279,12 +1282,13 @@ ret
 ;@param de = dest
 ;@param hl = source
 ;Copies data from src to dest.
+;10 cycles / byte
 memcpy8_hl_to_de::
-  :ld a,[hli]
-  ld [de],a
-  inc de
-  dec c
-  jp nz,:-
+  :ld a,[hli] ;2c 1b
+  ld [de],a ;2c 1b
+  inc de ;2c 1b
+  dec c ;1c 1b
+  jr nz,:- ;3c 2b
 ret
 ;@param b = size in bytes
 ;@param de = dest
@@ -1469,14 +1473,6 @@ ret
 
 
     ;-------------------------------------------DATA-------------------------------
-Viewfinder_UI_Tiles:
-    incbin "assets/viewfinderUI.1bpp", 0,256
-gfxButtons_storage:
-    incbin "assets/UserButtons.1bpp",0,128
-gfxActions_storage:
-    incbin "assets/actions.1bpp",0,128
-gfxObjects0_storage:
-    incbin "assets/objects0.1bpp",0,128
 Palette:
 PaletteBG:
 PaletteOBJ:

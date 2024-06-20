@@ -17,7 +17,7 @@ cgb_rom := bin/$(cgb_name:.asm=.gbc)
 
 all:	bin/silih.gbc
 
-bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o bin/remote.o
+bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o bin/remote.o bin/graphics.o
 	$(LD) $(LDFLAGS) $@ $^
 	$(FX) $(FXFLAGS) $@
 		
@@ -25,7 +25,7 @@ bin/loader.o: src/loader/loader.asm
 	$(AS) $(ASFLAGS) $@ src/loader/loader.asm
 
 #This should have a prerequisite for all .1bpp asset files, but doesn't -- right now we're just hard-coding them
-bin/%.o: src/%.asm assets/viewfinderUI.1bpp assets/UserButtons.1bpp assets/actions.1bpp assets/objects0.1bpp assets/palette.bin
+bin/%.o: src/%.asm assets/viewfinderUI.1bpp assets/UserButtons.1bpp assets/actions.1bpp assets/objects0.1bpp assets/alphabet.1bpp assets/palette.bin
 	$(AS) $(ASFLAGS) $@ $<
 
 clean:

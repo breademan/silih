@@ -5,8 +5,8 @@ INCLUDE "src/general.inc"
 SECTION "Payload UI Data SECTION",ROM0[$1000 + ($1000*UI_RAMBANK)]
 UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
-UIJumpTable: ;12 bytes
-dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm
+UIJumpTable: ;14 bytes
+dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm, MenuHandler_Settings
 
   ;determines what happens when you press up/down to modify a value during MENU_SELECTED menustate
 ChangeOptionHandler_table:
@@ -244,9 +244,15 @@ MenuHandler_Selected:
 
   .check_b:
   bit JOYPAD_B, b
-  jp z, .buttons_end
+  jp z, .check_start
   ;call InitMenuState_CameraOpts
   jp .buttons_end ;we don't want to do any other state transitions if we transition to CameraOpts, so skip the other button checks
+
+  .check_start:
+  bit JOYPAD_START, b
+  jp z, .buttons_end
+  call InitMenuState_Settings
+  jp .buttons_end
 
   .buttons_end:
 
@@ -337,7 +343,9 @@ MenuHandler_DeleteConfirm:
 
 jp HandleInputDone
 
+MenuHandler_Settings:
 
+jp HandleInputDone
 
 ;----------------------Functions---------------------------
 ; These are called when entering and returning to menu states
@@ -418,6 +426,17 @@ InitMenuState_TakeConfirm:
 
   call SetBGPalette0to1
   ret
+
+InitMenuState_Settings:
+
+
+ld a, MENU_STATE_SETTINGS
+ldh [MENU_STATE],a
+
+;Set up tilemap
+
+;move cursor to appropriate position.
+ret
 
 
 MoveCursorSpriteToNowhere:

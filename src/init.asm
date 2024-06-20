@@ -239,6 +239,8 @@ InitTilemapAttributes:
 LoadButtonTiles:
 
   ;At the end of InitTilemapAttributes, VRAM bank is 1, so we need not switch.
+  ld a,GRAPHICS_BANK ;Switch to bank holding graphics
+  ldh [rSVBK], a
   ld hl, gfxButtons_storage
   ld de, BUTTON_TILES_ORIGIN_ADDR
   ld b, $7F
@@ -258,6 +260,14 @@ LoadUITiles:
   ld de, UI_TILES_ORIGIN
   ld b, $FF
   call memcpy_1bpp
+
+LoadAlphabetTiles:
+    ;Unpacks the 1bpp Alphabet tiles into the appropriate area of VRAM (last 32 tiles of bank 0)
+    DEF ALPHABET_TILES_ORIGIN EQU $9000
+    ld hl, gfxAlphabet_storage
+    ld de, ALPHABET_TILES_ORIGIN
+    ld b, $FF
+    call memcpy_1bpp
 
 LoadObject0Tiles:
   ;Unpacks the 1bpp UI tiles into the appropriate area of VRAM (last 32 tiles of bank 0)
