@@ -14,8 +14,13 @@ ChangeOptionHandler_table:
   dw \6
   ENDM
   INCLUDE "src/ui_elements.inc"
-  
-  ASSERT .end < $D100, "ChangeOptionHandler_table is not aligned on 256 bytes"
+
+Settings_ApressHandler_table:
+  MACRO X
+  dw \8
+  ENDM
+  INCLUDE "src/settings.inc"
+  ASSERT .end < $D100, "Tables in ui.asm are not aligned on 256 bytes"
     .end
 
 SidebarArrangementViewfinder:
@@ -345,6 +350,101 @@ jp HandleInputDone
 
 MenuHandler_Settings:
 
+  ;Decrease SettingsPosition by 1 and bounds-check
+  macro DEC_SETTINGS_POSITION_INTO_A
+    ldh a,[SettingsPosition]
+    and a
+    jr z,:+	
+    dec a
+    :
+  endm
+
+;Increase SettingsPosition by 1 and bounds-check
+  macro INC_SETTINGS_POSITION_INTO_A
+    ldh a,[SettingsPosition]
+    cp a,NUM_SETTINGS-1
+    jr z,:+
+    inc a
+    :
+  endm	
+
+;Don't take input if the viewfinder state is not paused
+  ldh a, [viewfinder_state]
+  cp a, VF_STATE_PAUSED
+  jp nz, .no_buttons_pressed ;if state isn't VF_STATE_PAUSED, don't take input
+
+  .check_up
+  ldh a,[joypad_active]
+  bit JOYPAD_UP, a
+  jp z,.check_down
+  IF !SCREEN_FLIP_V
+    DEC_SETTINGS_POSITION_INTO_A
+  ELSE
+    INC_SETTINGS_POSITION_INTO_A
+  ENDC
+  ldh [SettingsPosition],a
+  xor a
+  ldh [SettingsNybble],a
+  call MoveCursorSpriteToSettingsPosition
+
+  .check_down
+  ldh a,[joypad_active]
+  bit JOYPAD_DOWN, a
+  jp z,.check_left
+  IF SCREEN_FLIP_V
+    DEC_SETTINGS_POSITION_INTO_A
+  ELSE
+    INC_SETTINGS_POSITION_INTO_A
+ENDC
+ldh [SettingsPosition],a
+xor a
+ldh [SettingsNybble],a
+call MoveCursorSpriteToSettingsPosition
+
+  .check_left
+  ldh a,[joypad_active]
+  bit JOYPAD_LEFT, a
+  jp z,.check_right
+  ;TODO: What to do on left.
+
+  .check_right
+  ldh a,[joypad_active]
+  bit JOYPAD_RIGHT, a
+  jp z,.check_b
+  ;TODO: what to do on right.
+
+  ldh a,[joypad_active]
+  .check_b
+  bit JOYPAD_B,a
+  jp z, .check_a
+    call InitMenuState_Selected
+    jp .end
+
+  ldh a, [joypad_active]
+  .check_a:
+  bit JOYPAD_A, a
+  jp z, .no_buttons_pressed
+    ;we have a jump table containing all the A-press handlers. Dereference that table based on Settings_Position
+    ld hl,.Apresshandler_return
+    push hl
+    ld hl, Settings_ApressHandler_table
+    ldh a,[SettingsPosition]
+    add a,a
+    add a,l
+    ld l,a
+    ld a,[hli]
+    ld e,a
+    ld h, [hl]
+    ld l,e
+    jp hl
+  .Apresshandler_return
+  
+
+  .no_buttons_pressed
+.end
+
+call DrawSettings
+
 jp HandleInputDone
 
 ;----------------------Functions---------------------------
@@ -411,6 +511,15 @@ InitMenuState_Selected::
   ld hl, SidebarArrangementSelected   ;Fill sidebar buffer with new prompts
   call PrepareSidebar  
   call SetBGPalette0to0
+
+  ld a,$70
+  ldh [rSCY], a
+  xor a
+  ldh [rSCX], a
+  ld a,[wLCDC] ;Switch to tilemap 0
+  res 3,a
+  ld [wLCDC],a
+
   ret
 
 InitMenuState_TakeConfirm:
@@ -428,21 +537,56 @@ InitMenuState_TakeConfirm:
   ret
 
 InitMenuState_Settings:
+  ld a, MENU_STATE_SETTINGS
+  ldh [MENU_STATE],a
 
-
-ld a, MENU_STATE_SETTINGS
-ldh [MENU_STATE],a
-
-;Set up tilemap
-
-;move cursor to appropriate position.
+  xor a
+  ldh [SettingsPosition],a
+  ldh [SettingsNybble],a
+  ldh [rSCX], a
+  IF (SCREEN_FLIP_V)
+  ld a,8*(32-18)
+  ENDC
+  ldh [rSCY], a
+  ;move cursor to appropriate position.
+  call MoveCursorSpriteToSettingsPosition
+  ;set LCDC.3 to 1 (tilemap 1)
+  ld a,[wLCDC]
+  set 3,a
+  ld [wLCDC],a
 ret
 
+MoveCursorSpriteToSettingsPosition:
+  ;First, move cursor to the appropriate line. Then, move it to the nybble position (rightmost location minus the nybble position)
+  ld a,[SettingsPosition]
+  add a ;multiply by 8
+  add a
+  add a
+  IF SCREEN_FLIP_V
+    sub a,152 ;CursorY: 152-(8*SettingsPosition) if flipped.
+    cpl
+    inc a
+  ELSE
+    add a,$10 ; CursorY = 16 + 8*SettingsPosition.
+  ENDC
+  ld hl,Sprite0_CursorY
+  ld [hli],a 
+  ld a,[SettingsNybble]
+  IF SCREEN_FLIP_H
+    add a,8 ;CursorX = 8+SettingsNybble if flipped
+  ELSE
+    sub a,160 ;CursorX = 160-SettingsNybble
+    cpl
+    inc a
+  ENDC
+  ld [hli],a
+
+ret
 
 MoveCursorSpriteToNowhere:
   xor a
   ld [Sprite0_CursorY],a
-  ret
+ret
 
 
 
@@ -881,5 +1025,100 @@ RestoreBank0:
   bit 4,h
   jr nz, :-
   ret
+
+;-----------------Setting Modify Actions-------------------------------------
+
+Setting_SerialRemote_Toggle:
+  ld a,[Setting_SerialRemote]
+  xor a,$01
+  ld [Setting_SerialRemote],a
+ret
+
+Setting_OnTakeAction_SetDefault:
+  ;TODO
+ret
+
+Setting_Timer_Toggle:
+  ;TODO
+ret
+
+Setting_DelayTime_SetDefault:
+  ;TODO
+ret
+
+Setting_AEB_Toggle:
+  ;TODO
+ret
+
+Setting_AEB_Count_SetDefault:
+  ;TODO
+ret
+
+Setting_AEB_Interval_SetDefault:
+  ;TODO
+ret
+
+Init_PrintAll:
+  ;TODO
+ret
+
+Init_SaveSettings:
+  ;TODO
+ret
+
+Init_SaveCamOpts:
+  ;TODO
+ret
+;------------Setting Draw Actions-----------------------------------------------
+
+;Draws the various settings using dedicated functions
+DrawSettings:
+  ;TODO replace with X macro
+  call DrawSetting_SerialRemote
+
+ret
+
+;Takes a LOGICAL X,Y value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap.
+macro SETTINGS_PUT_TILEMAP_ADDR_IN_HL
+  DEF TEMPADDR = _SCRN1
+  ;Get address of logical line
+  IF (SCREEN_FLIP_V)
+    DEF TEMPADDR += (31-\2)*32
+  ELSE
+    DEF TEMPADDR += (\2)*32
+  ENDC
+
+  IF (SCREEN_FLIP_H)
+    DEF TEMPADDR += 19-\1
+  ELSE
+    DEF TEMPADDR += \1
+  ENDC
+  ld hl,TEMPADDR
+endm
+
+DrawSetting_SerialRemote:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_HL 19,0
+  ld a,[Setting_SerialRemote]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+;@param b: tile ID to draw
+;@param hl: address in tilemap to draw it
+DrawTileInHBlank:
+  ;Busy wait for sending pixels - mode 3
+  :ldh a,[rSTAT]
+  and a,%00000011
+  cp a,$03
+  jr nz,:-
+  ;Busy wait for Hblank - mode 0
+  :ldh a,[rSTAT]
+  and a,%00000011
+  jr nz,:-
+  ;Draw tile in tilemap - we have <dec94 cycles
+  ld a,b
+  ld [hl],a
+ret
 
 ENDL

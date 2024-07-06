@@ -34,3 +34,5 @@ MENU_NYBBLE_PREV:: db  ;^^^^^
 VBlank_finished_flag:: db
 Vblank_Sidebar_DrawLine:: db ;contains the line to draw in the vertical UI
 VBlank_AnimationCounter:: db
+SettingsPosition:: db
+SettingsNybble:: db

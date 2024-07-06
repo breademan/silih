@@ -64,9 +64,22 @@ InitVariables:
   ldh [VBlank_AnimationCounter],a
   ldh [MENU_NYBBLE],a
   ldh [MENU_POSITION],a
-  
+  ldh [SettingsPosition],a
+  ldh [SettingsNybble],a
+
   ld a, $01
   ld [ShowPromptsFlag], a
+
+
+InitSettings:
+  MACRO X
+  ld a,\9 ; load default value into a
+  ld [\2],a ;load default value into the setting
+  ;TODO: This will cause a write to 0000 (RAM Enable) for settings with the variable location NULL
+  ;It will also waste space
+  ENDM
+
+  INCLUDE "src/settings.inc"
 
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
@@ -347,7 +360,6 @@ BuildHorizontalHeader: ;Fills the UI with the icons for each setting
 ;This holds the horizontal parts of the UI. Each line is separated by an extra 3 zeros, and every other tileline is skipped (so it can hold data).
 ;Tile IDs are UI_ICONS_BASE_ID + index in the source image
 UI_ICONS_ARRANGEMENT_H:
-  DEF UI_ICONS_BASE_ID EQU $60
   MACRO X
     db UI_ICONS_BASE_ID+\2
   ENDM
@@ -382,6 +394,107 @@ ld [hli],a
 ld a,h
 cp a,b
 jp nz,:- ;if h != $96, loop
+
+
+;---------SETTINGS TILEMAP + ATTRS--------------------
+; Fill tilemap 8C00-8FFF with the string corresponding to each setting
+
+SETCHARMAP SETTINGS_CHARMAP
+
+;Can be replaced by memfill16
+;clear from 9C00 to 9FFF
+ClearSettingsTilemap:
+  ld hl, _SCRN1
+  ld b, ALPHABET_BLANK_TILE_ID
+  :ld a,b
+  ld [hli],a
+  ld a,h
+  cp a,$A0
+  jr nz,:-
+
+DrawSettingsTilemap_Static:
+  ld de, SETTINGS_STRINGS_TABLE
+  DEF SETTINGS_TILEMAP_START = $9C00
+  IF SCREEN_FLIP_V
+    DEF SETTINGS_TILEMAP_START += $03E0
+  ENDC
+  IF SCREEN_FLIP_H
+    DEF SETTINGS_TILEMAP_START += 19
+  ENDC
+  ld hl,SETTINGS_TILEMAP_START
+  ;outer loop:
+  .outerLoop
+  ;get length of string and place in b
+  ld a,[de]
+  inc de
+  ;if length is 0, finish outer loop
+  and a
+  jp z,.finishDraw
+  ld b,a
+
+  ;inner loop: write line
+  .innerLoop
+  ld a, [de]
+  IF SCREEN_FLIP_H
+    ld [hld],a
+  ELSE
+    ld [hli], a
+  ENDC
+  inc de
+  dec b ;if string finished, move de to point to next line
+  jr nz,.innerLoop
+
+  ;the left side of each line is 9C00 + $20*line number. 
+  IF SCREEN_FLIP_V
+  ld bc, -$0020 ;If going down (vflip), 16-bit sub 20 from dest pointer and reset the lower 5 bits.
+  ELSE
+  ld bc,$0020 ;If going up (no vflip), 16-bit add 20 to dest pointer and reset the lower 5 bits.
+  ENDC
+
+  add hl,bc
+  ld a, %11100000
+  and a,l
+  IF SCREEN_FLIP_H
+    add a,19 ;start write at end of line if horizontally flipped
+  ENDC
+  ld l,a
+  jp .outerLoop
+.finishDraw
+
+
+;Fill the attribute map
+;switch to VRAM bank 1
+ld a,$01
+ldh [rVBK], a
+ld hl, _SCRN1
+;set bit 3 (get tiles from vram1) and palette to the UI palette
+DEF SETTINGS_STATIC_ATTR = %00001000
+IF (SCREEN_FLIP_H)
+  DEF SETTINGS_STATIC_ATTR |= %00100000
+ENDC
+IF(SCREEN_FLIP_V)
+  DEF SETTINGS_STATIC_ATTR |= %01000000
+ENDC
+;Can be replaced by memfill
+:ld a,SETTINGS_STATIC_ATTR
+;fill until $9FFF
+ld [hli],a
+ld a,h
+cp a,$A0
+jr nz,:-
+
+
+;TODO: put this table somewhere else to avoid needless jr instruction
+jr :+
+SETTINGS_STRINGS_TABLE:
+
+MACRO X
+    db STRLEN(\1),\1 
+  ENDM
+INCLUDE "src/settings.inc"
+db 0
+:
+
 
 ;Init LCD by setting the scroll registers, enabling the screen, and enabling VBlank interrupt
 Init_LCD:
@@ -512,6 +625,6 @@ ld a,TEST_CALLER_RAMBANK
 ldh [rSVBK],a
 call Trampoline_test_caller ;Set a watchpoint here and see if $DEADBEEF ends up in hlbc
 
-;Switch VRAM bank to 1 so that it alternates in-sync with the window
-xor a ; if we're doing no-tear, then VBK should be 0 at all times
+;Switch VRAM bank to 0
+xor a ; VBK should generally be 0
 ldh [rVBK], a

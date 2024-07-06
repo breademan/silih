@@ -48,7 +48,7 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptDither_RAM: ds 48 ; Working copy of the dither table
 .end  
   ;Video mirror register: 1 byte
-  wLCDC: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing ;Must not be placed in the OptionLinesBuffer region as it is cleared after wLCDC was written.
+  wLCDC:: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing ;Must not be placed in the OptionLinesBuffer region as it is cleared after wLCDC was written.
   
   ;HDMA variables: 7 bytes
   hdma_current_transfer_length: db
@@ -77,14 +77,21 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
-
+  ;7 bytes
+  Setting_SerialRemote:: db 
+  Setting_AEB_Interval:: db
+  Setting_AEB_Count:: db
+  Setting_AEB:: db
+  Setting_DelayTime:: db
+  Setting_TimerEnable:: db
+  Setting_OnTakeAction:: db
   
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
   UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
   ;Cumulative $E0 bytes
-  ;$1F bytes remaining
+  ;$18 bytes remaining
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -344,8 +351,8 @@ DMAHandler:
 
     ;If we're not going to restart a capture, change the viewfinder state to VF_STATE_PAUSED
     ldh a,[MENU_STATE]
-    cp MENU_STATE_TAKE_CONFIRM
-    jp z, .pausecapture
+    cp MENU_STATE_SELECTED
+    jp nz, .pausecapture
 
     call StartCapture
     
@@ -365,10 +372,10 @@ DMAHandler:
   jp ViewfinderChecks
 
 PauseHandler:
-  ; While the menustate is not CAMERA_OPTS, DITHER_OPTS, or SELECTED (MENU_STATE<=2), don't start a capture
+  ;When menustate is SELECTED, restart capture
   ldh a, [MENU_STATE]
-  cp a,MENU_STATE_SELECTED+1
-  jp nc, ViewfinderChecks;if carry, we're in one of the camera states where viewfinder is active and need to restart the capture + change viewfinder state
+  cp a,MENU_STATE_SELECTED
+  jp nz, ViewfinderChecks;if carry, we're in one of the camera states where viewfinder is active and need to restart the capture + change viewfinder state
   
   call StartCapture  
   ld a, VF_STATE_CAPTURING
@@ -694,7 +701,7 @@ Trampoline_hl_e::
   ;switch back to caller WRAM bank
   pop af    ;callee function can return in any reg except a
   ldh [rSVBK], a
-
+NullFunction::
   ret
 
 
@@ -1340,11 +1347,19 @@ jp $100 ; jp back to launcher ROM
 
 GetSerialInput:
 CheckSerial:
+  ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip
+  and a
+  ld b,a
+  jr z,GetInputPtr
   .startTransfer
   ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
   ldh [rSC], a
   ;Input format is D U L R: START SEL A B
   GetInputPtr: call $0000
+
+  ld a,b   ; If serial remote is disabled, skip
+  and a
+  ret z
   ;Here, the transfer should be finished and SC should be reset to 0.
   ;TODO: wait for SC to be low, with timeout. Currently we just assume the transfer finished.
   ldh a,[rSB]
@@ -1550,6 +1565,9 @@ OrderTableRelative: db (7-15),(13-7), (5-13), \
       (0-6), (8-0), (2-8), (10-2)
 .end
 
+
+
+SETCHARMAP ASCII
 LoaderTitle:: db "SILIH"
 .end
 
