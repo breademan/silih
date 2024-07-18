@@ -105,7 +105,7 @@ PayloadEntrypoint:
 
     INCLUDE "src/init.asm"
 
-ViewfinderMain:
+MainLoop:
   ; Things done every frame
   xor a
   ldh [VBlank_finished_flag],a ;clear the VBlank finished flag
@@ -127,7 +127,7 @@ ViewfinderChecks:
     ;If VBlank ISR has run, jump back to the stuff done every frame. If it's not run yet, keep checking for events to handle
     ldh a, [VBlank_finished_flag]
     and a
-    jp nz, ViewfinderMain
+    jp nz, MainLoop
     ;Jump to relevant state handler
     ldh a, [viewfinder_state]
     add a,a

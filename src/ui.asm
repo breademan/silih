@@ -23,6 +23,39 @@ Settings_ApressHandler_table:
   ASSERT .end < $D100, "Tables in ui.asm are not aligned on 256 bytes"
     .end
 
+Settings_LogicalLeftHandler_table:
+  MACRO X
+  dw \6
+  ENDM
+  INCLUDE "src/settings.inc"
+
+Settings_LogicalRightHandler_table:
+  MACRO X
+  dw \7
+  ENDM
+  INCLUDE "src/settings.inc"
+
+;\4 is min, 5 is max.
+Settings_MinMaxTable:
+  MACRO X
+  IF (\3==1)
+    DEF MIN_LABELNAME EQUS "\\2_Min"
+    DEF MAX_LABELNAME EQUS "\\2_Max"
+    {MIN_LABELNAME}: db \4
+    {MAX_LABELNAME}: db \5
+    purge MIN_LABELNAME
+    purge MAX_LABELNAME
+  ENDC
+  ENDM
+  INCLUDE "src/settings.inc"
+
+
+OnTakeActionStrings:
+    db "SAVE"
+    db "PRNT"
+    db "S PR"
+    db "XFER"
+
 SidebarArrangementViewfinder:
   db (SidebarArrangementViewfinder.end - SidebarArrangementViewfinder) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
@@ -405,13 +438,48 @@ call MoveCursorSpriteToSettingsPosition
   ldh a,[joypad_active]
   bit JOYPAD_LEFT, a
   jp z,.check_right
-  ;TODO: What to do on left.
+    ;we have a jump table containing all the left-press handlers. Dereference that table based on Settings_Position
+    ld hl,.LeftPressHandler_return
+    push hl
+    IF !SCREEN_FLIP_H
+      ld hl, Settings_LogicalLeftHandler_table
+    ELSE
+      ld hl, Settings_LogicalRightHandler_table
+    ENDC   
+    ldh a,[SettingsPosition]
+    add a,a
+    add a,l
+    ld l,a
+    ld a,[hli]
+    ld e,a
+    ld h, [hl]
+    ld l,e
+    jp hl
+  .LeftPressHandler_return
+
 
   .check_right
   ldh a,[joypad_active]
   bit JOYPAD_RIGHT, a
   jp z,.check_b
-  ;TODO: what to do on right.
+    ;we have a jump table containing all the right-press handlers. Dereference that table based on Settings_Position
+    ld hl,.RightPressHandler_return
+    push hl
+    IF !SCREEN_FLIP_H
+      ld hl, Settings_LogicalRightHandler_table
+    ELSE
+      ld hl, Settings_LogicalLeftHandler_table
+    ENDC
+    ldh a,[SettingsPosition]
+    add a,a
+    add a,l
+    ld l,a
+    ld a,[hli]
+    ld e,a
+    ld h, [hl]
+    ld l,e
+    jp hl
+  .RightPressHandler_return
 
   ldh a,[joypad_active]
   .check_b
@@ -1035,27 +1103,38 @@ Setting_SerialRemote_Toggle:
 ret
 
 Setting_OnTakeAction_SetDefault:
-  ;TODO
+  ld a,TAKE_ACTION_SAVE
+  ld [Setting_OnTakeAction],a
 ret
 
-Setting_Timer_Toggle:
-  ;TODO
-ret
+; Setting_Timer_Toggle:
+;   ld a,[Setting_TimerEnable]
+;   xor a,$01
+;   ld [Setting_TimerEnable],a
+; ret
 
 Setting_DelayTime_SetDefault:
-  ;TODO
+  ld a,[Setting_DelayTime]
+  xor a
+  ld [Setting_DelayTime],a
 ret
 
 Setting_AEB_Toggle:
-  ;TODO
+  ld a,[Setting_AEB]
+  xor a,$01
+  ld [Setting_AEB],a
 ret
 
 Setting_AEB_Count_SetDefault:
-  ;TODO
+  ld a,[Setting_AEB_Count]
+  ld a,$01
+  ld [Setting_AEB_Count],a
 ret
 
 Setting_AEB_Interval_SetDefault:
-  ;TODO
+  ld a,[Setting_AEB_Interval]
+  ld a,$10
+  ld [Setting_AEB_Interval],a
 ret
 
 Init_PrintAll:
@@ -1075,11 +1154,16 @@ ret
 DrawSettings:
   ;TODO replace with X macro
   call DrawSetting_SerialRemote
+  call DrawSetting_OnTakeAction
+  call DrawSetting_DelayTime
+  call DrawSetting_AEB
+  call DrawSetting_AEB_Count
+  call DrawSetting_AEB_Interval
 
 ret
 
-;Takes a LOGICAL X,Y value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap.
-macro SETTINGS_PUT_TILEMAP_ADDR_IN_HL
+;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
+macro SETTINGS_PUT_TILEMAP_ADDR_IN_R16
   DEF TEMPADDR = _SCRN1
   ;Get address of logical line
   IF (SCREEN_FLIP_V)
@@ -1093,17 +1177,96 @@ macro SETTINGS_PUT_TILEMAP_ADDR_IN_HL
   ELSE
     DEF TEMPADDR += \1
   ENDC
-  ld hl,TEMPADDR
+  ld \3,TEMPADDR
 endm
 
 DrawSetting_SerialRemote:
-  SETTINGS_PUT_TILEMAP_ADDR_IN_HL 19,0
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,0,HL
   ld a,[Setting_SerialRemote]
   add a,CHECKBOX_TILE_ID_DIS
   ld b,a
   call DrawTileInHBlank
 ret
 
+DrawSetting_OnTakeAction:
+  ld hl, OnTakeActionStrings ;each entry is 4 bytes long (does not need to be byte-addr-aligned)
+  ld a,[Setting_OnTakeAction]
+  add a,a
+  add a,a ;multiply by 4 for 4-byte entries
+
+	ld d, 0 ; add a into hl: 4 bytes, 5 cycles
+	ld e, a
+	add hl, de
+
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,1,de
+  call DrawFourTilesInHBlank
+
+ret
+
+DrawSetting_DelayTime:
+  ld a,[Setting_DelayTime]
+  ld c,a
+  swap a
+  and a,$0F
+  add a,UI_ICONS_BASE_ID
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 18,2,hl
+  ld b,a
+  call DrawTileInHBlank
+
+  ld a,c
+  and a,$0F
+  add a,UI_ICONS_BASE_ID
+  ld b,a
+  call DrawTileInHBlank
+
+ret
+
+DrawSetting_AEB:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,3,HL
+  ld a,[Setting_AEB]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_AEB_Count:
+  ld a,[Setting_AEB_Count]
+  add a,UI_ICONS_BASE_ID
+  ld b,a
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,4,hl
+  call DrawTileInHBlank
+ret
+
+DrawSetting_AEB_Interval:
+
+  ld a,[Setting_AEB_Interval]
+  ld c,a
+  swap a
+  and a,$0F
+  add a,UI_ICONS_BASE_ID
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,5,hl
+  ld b,a
+  call DrawTileInHBlank
+
+  ld a,c
+  and a,$0F
+  add a,UI_ICONS_BASE_ID
+  ld b,a
+  call DrawTileInHBlank
+  ;Draw 00 as the last 2 bytes
+
+  ld b,UI_ICONS_BASE_ID
+  call DrawTileInHBlank
+  call DrawTileInHBlank
+
+ret
+
+
+;Waits for Hblank and draws a single tileID b to tilemap location hl
+;To interface with its callee, side effect: Returns with hl incremented if not horizontally flipped
+; If horizontally flipped, returns with hl decremented
+;This should be called in user-facing left-to-right order (for numbers, most-significant nybble first)
+;@clobber: a, hl
 ;@param b: tile ID to draw
 ;@param hl: address in tilemap to draw it
 DrawTileInHBlank:
@@ -1118,7 +1281,130 @@ DrawTileInHBlank:
   jr nz,:-
   ;Draw tile in tilemap - we have <dec94 cycles
   ld a,b
-  ld [hl],a
+  IF SCREEN_FLIP_H
+  ld [hld],a
+  ELSE
+  ld [hli],a
+  ENDC
+ret
+
+;@param hl: location of table with 4-char entries containing the strings for setting values
+;@param de: location in tilemap to start drawing at (should be the "start" side of the string, or most significant nybble)
+DrawFourTilesInHBlank:
+
+  push de
+
+  ld a,[hli] ;1st char in b
+  ld b,a
+  ld a,[hli] ;2nd char in c
+  ld c,a
+  ld a,[hli] ;3rd char in d
+  ld d,a
+  ld e,[hl] ;4th char in e
+   
+  pop hl
+  call DrawTileInHBlank
+
+  ld b,c
+  call DrawTileInHBlank
+
+  ld b,d
+  call DrawTileInHBlank
+
+  ld b,e
+  call DrawTileInHBlank
+
+ret
+
+
+; @arg a: max
+; @arg b: min
+; @arg hl: address of variable
+; @clobber a
+IncByteWithWraparound:
+  cp a, [hl] ;if a = max, set to min
+  jr z,:+
+    inc [hl] ;value isn't at max? increment and return
+    ret
+  :
+    ld [hl], b
+ret
+
+; @arg a: min
+; @arg b: max
+; @arg hl: address of variable
+; @clobber a
+DecByteWithWraparound:
+  cp a, [hl] ;if a = min, set to max
+  jr z,:+
+    dec [hl] ;value isn't at min? dec and return
+    ret
+  :
+    ld [hl], b
+ret
+
+Setting_OnTakeAction_Inc:
+  ld hl, Setting_OnTakeAction_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_OnTakeAction
+  call IncByteWithWraparound
+ret
+
+Setting_OnTakeAction_Dec:
+  ld hl, Setting_OnTakeAction_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_OnTakeAction
+  call DecByteWithWraparound
+ret
+
+Setting_AEB_Interval_Inc:
+  ld hl, Setting_AEB_Interval_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_AEB_Interval
+  call IncByteWithWraparound
+ret
+
+Setting_AEB_Interval_Dec:
+  ld hl, Setting_AEB_Interval_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_AEB_Interval
+  call DecByteWithWraparound
+ret
+
+Setting_AEB_Count_Inc:
+  ld hl, Setting_AEB_Count_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_AEB_Count
+  call IncByteWithWraparound
+ret
+
+Setting_AEB_Count_Dec:
+  ld hl, Setting_AEB_Count_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_AEB_Count
+  call DecByteWithWraparound
+ret
+
+Setting_DelayTime_Inc:
+  ld hl, Setting_DelayTime_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_DelayTime
+  call IncByteWithWraparound
+ret
+
+Setting_DelayTime_Dec:
+  ld hl, Setting_DelayTime_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_DelayTime
+  call DecByteWithWraparound
 ret
 
 ENDL

@@ -73,10 +73,10 @@ InitVariables:
 
 InitSettings:
   MACRO X
+  IF (\2)!= NULL
   ld a,\9 ; load default value into a
   ld [\2],a ;load default value into the setting
-  ;TODO: This will cause a write to 0000 (RAM Enable) for settings with the variable location NULL
-  ;It will also waste space
+  ENDC
   ENDM
 
   INCLUDE "src/settings.inc"
