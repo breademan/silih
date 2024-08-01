@@ -39,11 +39,11 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptEdgeMode:: db ;Meta-option that modifies NVH
   ;These variables are downstream of the above individual CamOpt variables. UpdateCameraOpts uses these contiguously and with CamOptDither_RAM, so they must be contiguous
   ; 5 + 48 bytes
-  CamOptA001_RAM: db
-  CamOptA002_RAM: db
-  CamOptA003_RAM: db ; Watch out here: C may be stored in RAM little-endian, but the camera registers use big-endian.
-  CamOptA004_RAM: db
-  CamOptA005_RAM: db
+  CamOptA001_RAM:: db
+  CamOptA002_RAM:: db
+  CamOptA003_RAM:: db ; Watch out here: C may be stored in RAM little-endian, but the camera registers use big-endian.
+  CamOptA004_RAM:: db
+  CamOptA005_RAM:: db
   
   CamOptDither_RAM: ds 48 ; Working copy of the dither table
 .end  

@@ -965,7 +965,121 @@ ld l, $00
   ld a,h ; if h is $AF, we've reached the end
   cp a,$AF
   jr nz,.loop
+  call WriteThumbnailMetadata
   ret
+
+
+;Call this after saving capture data
+;Writes metadata to the lower 4 lines of the thumbnail
+;Thumbnail location is A/BE00 -- the metadata location is spread out as the last 4 lines (8 Bytes each) of the last 4 tiles
+;Prior to calling, bankswitch to the correct bank (since this is usually called right after a copy, the correct bank is already loaded)
+;@param e: $0F for odd-numbered slot (BExx), $FF for even-numbered (AExx)
+;@clobber: a, hl, bc
+WriteThumbnailMetadata:
+  ;Set hl to start of metadata location plus 12.5 tiles = A/BE00 + 16*12.5 = $C8 bytes
+  ld l,$C8
+
+  ld a, $AE
+  push de ; the thumbnail generate code uses e, so we don't want to change it
+  inc e ;e is either $10 (for BE) or $00 for AE. Add to h.
+  add a,e ; a = $AE + 00 or $10
+  ld h,a
+
+  ;write first 8 bytes -- shadow A000-A005
+  ;We don't have a shadow A000 since we just write %00000011 into A000 directly to start capture
+  ;Inaccurately write static %00000010 instead
+  ld a, %00000010
+  ld [hli],a
+  ld bc, CamOptA001_RAM
+  ld a, [bc]
+  inc bc
+  ld [hli],a ; Write shadow A001
+  ld a, [bc]
+  inc bc
+  ld [hli],a ; Write shadow A002
+  ld a, [bc]
+  inc bc
+  ld [hli],a ; Write shadow A003
+  ld a, [bc]
+  inc bc
+  ld [hli],a ; Write shadow A004
+  ld a, [bc]
+  ld [hli],a ; Write shadow A005
+  ;Write current_exposure
+  ; ld bc,CamOptC_RAM
+  ; ld a, [bc]
+  ; inc bc
+  ; ld [hli],a ;low byte
+  ; ld a,[bc]
+  ; ld [hli],a ; high byte
+
+  ;Jump to next tile
+  ;ld l, $D8
+  ;current exposure index
+  ;This would likely require adding an index->value table.
+  ;The web gallery doesn't use it, so I'll leave the other fields unimplemented
+    ;xor a,0
+    ;ld [hli],a
+    ;current gain:
+    ;ld a,[CamOptG_RAM]
+    ;ld [hli],a
+    ;current zero point
+    ;current edge ratio
+    ;current voltage ref
+    ;voltage_out (2bytes)
+    ;current contrast
+
+    ;Jump to next tile
+    ;ld l,$E8
+    ;edge operation
+    ;current brightness (2 bytes)
+    ;dithering4 : ditheringHighLight1 : invertOutput1 : edge_exclusive1 : cpu_fast
+  ;checksum 2 bytes: 
+
+  ;Calculate checksum in pieces: start with the 2 bytes at xEC8+6
+  ld l, $C8+6
+  ld c,2
+  ld d,$55 ;sum seed: I may have gotten endianness wrong and we may need to flip this
+  ld e,$AA ;xor seed
+  call CalculateChecksum
+  ;Jump to next set of 8 bytes at $D8
+  ld l, $D8
+  ld c,8
+  call CalculateChecksum
+  ;Jump to next set of 4 bytes at $E8
+  ld l,$E8
+  ld c,4
+  call CalculateChecksum
+  ;write to E8+4 and E8+5
+  ld l,$E8+4
+  ld a,d
+  ld [hli],a
+  ld [hl], e
+
+  pop de ; restore e so GenerateThumbnail can use it
+ret
+
+;@param hl: source address
+;@param c: size
+;@param d: initial value for sum (lower address)
+;@param e: initial value for xor (higher address)
+;@return d: sum result
+;@return e: xor result
+;@clobber a, c, de, hl
+CalculateChecksum:
+
+  .loop
+  ld a, [hl] ;add to the running sum
+  add a,d
+  ld d,a
+  ld a,[hli] ;add to the running xor
+  xor a,e
+  ld e,a
+  dec c
+  jr nz,.loop
+
+ret
+
 
 /*  read from SRAM bank X:A000 or B000 (we don't need to know the bank, since we won't bankswitch if we're in the same bank as our thumbnail)
   generates a 32x32 (effectively,32x28) thumbnail. This is 2^(8) bytes, or from xE00-xEDF
