@@ -146,6 +146,7 @@ Viewfinder_jp_table:
     DW CapturingHandler
     DW DMAHandler
     DW PauseHandler
+    DW vfActionTransition
 
 VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ;Because we are jumping from the ROM's vblank ISR, we lose 22 cycles to PUSHesx4 and call to+jp from HRAM
@@ -238,9 +239,58 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 ;----------------------------- Event handlers------------------------------------------------------
 IdleHandler: ;Start a capture, change state to capturing
   call StartCapture
-  ld a, VF_STATE_CAPTURING
+  ld a, VF_STATE_TRANSITION
   ldh [viewfinder_state], a
+
+  ld a,VF_ACTION_VIEWFINDER
+  ldh [vfNextAction],a
+
   jp ViewfinderChecks
+
+
+vfActionTransition:
+  ldh a,[vfNextAction]
+  ldh [vfCurrentAction],a
+
+  ;Run entry code and set viewfinder state
+  and a ;VF_ACTION_VIEWFINDER is 0
+  ;If currentAction is VF_ACTION_VIEWFINDER, call StartCapture and set VF_STATE to _CAPTURING
+  jr nz,:+
+  call ActionInit_Viewfinder
+  jr .endActionInit
+  :dec a ;VF_ACTION_TAKE_SINGLE is 1
+  jr nz,:+;If currentAction is VF_ACTION_TAKE_SINGLE, set VF_STATE to _PAUSED
+  call ActionInit_TakeSingle
+  jr .endActionInit
+  :dec a ;VF_ACTION_BURST is 2
+  jr nz,:+  ;If currentAction is VF_ACTION_BURST, (precalculate capture parameters), set capture parameters, (set counter), start capture, and set VF_STATE to _CAPTURING
+  call ActionInit_Burst
+  jr .endActionInit
+  : ;check for next Action
+
+  .endActionInit
+  ; To avoid needless latency, jump back to viewfinder handler
+jp ViewfinderChecks
+
+ActionInit_Viewfinder:
+  call StartCapture
+
+  ld a,VF_ACTION_VIEWFINDER
+  ld [vfNextAction],a
+
+  ld a, VF_STATE_CAPTURING
+  ldh [viewfinder_state],a
+ret
+
+ActionInit_TakeSingle:
+  ld a, VF_STATE_PAUSED
+  ldh [viewfinder_state],a
+ret
+
+ActionInit_Burst:
+  ;TODO
+ret
+
 
 CapturingHandler:
   ld a, [$A000]
@@ -348,27 +398,11 @@ DMAHandler:
   jp ViewfinderChecks
 
     .transfer_complete
-
-    ;If we're not going to restart a capture, change the viewfinder state to VF_STATE_PAUSED
-    ldh a,[MENU_STATE]
-    cp MENU_STATE_SELECTED
-    jp nz, .pausecapture
-
-    call StartCapture
-    
-    ld a, VF_STATE_CAPTURING
+   
+    ld a, VF_STATE_TRANSITION
     ldh [viewfinder_state], a
     jp ViewfinderChecks
 
-  .pausecapture
-  ;Draw the capture confirm UI here too. If we draw it immediately upon pressing the button, the user won't have any indication of which picture they're saving 
-  ;Also, we should not accept input in the menu handler if Viewfinder state is not VF_PAUSED - this means it hasn't finished capturing the current image yet
-  ;TODO: users expect the button to capture the photo they SEE when they pressed it -- currently it's showing the next capture after the user pressed a button.
-  ;Since we're doing tearing, this is not usually possible -- if the user pressed it during CAPTURING, we can check for this and set state to VF_STATE_PAUSED 
-  ;Without initiating a DMA transfer.
-  ;But if it was pressed during DMA transfer, the user must wait until the DMA transfer is done.
-  ld a,VF_STATE_PAUSED
-  ldh [viewfinder_state],a
   jp ViewfinderChecks
 
 PauseHandler:
@@ -1483,6 +1517,75 @@ ModifyPalette:
   dec b ;1c
   jr nz,:- ;3c
 ret
+
+
+SaveToFreeSlot::
+    ;Switch to SRAMbank 0 and enable writing to it.
+    ld h,$0A 
+    ld [hl],h ;enable SRAM writes
+    ld h, HIGH(rRAMB) ;2c2b
+    ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
+    ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
+    call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
+    and a
+    jp z, .save_cleanup ;skip saving if FindAndFillFreeSlot returns 0
+
+    dec a
+    ;the bank we want to switch to, held in c, should be 1 + (slot index>>1).
+    ;Copy image data to the correct slot
+    bit 0, a
+    ld e, $FF ;if slot index is even
+    jr z,:+
+    ld e, $0F     ;if slot index is odd, set the value to add/sub from HIGH(src/dest pointer) to $0F. Otherwise, use -1 (FF)
+  :
+  ;shift right and add 1 to get the bank number
+  srl a
+  inc a
+  ld c,a ;the transfer function takes the SRAM bank number in c
+  call SaveCaptureDataFromSRAM0
+
+
+  ;SaveCaptureDataFromSRAM0 ends with the bank we want to write to already selected
+  ;if e is unchanged by this function, we can use it to decide whether we should go with AE00 or BE00
+  ld hl, $AE00
+  inc e ;this is 0 if e is FF (index is even -- we want to pass AE00)
+  jp z, :+
+  ;if it's not FF, index is odd -- we want to pass BE00
+  ld h, $BE
+  ;load HL as either AE00 or BE00
+  :call GenerateThumbnail
+
+  ;Now that we've saved, update the vertical UI buffer with the new free value
+  ld hl, SAVE_SLOTS_FREE
+  ld de, UIBuffer_Vertical+2
+  call UpdateByteInTilemap
+
+  .save_cleanup
+  ld h,$00
+  ld [hl],h ; disable SRAM writes
+ret
+
+;Depending on the current action, either saves or prints
+vfCompleteAction:
+
+  ret
+
+
+;Saves a single image
+vfCompleteAction_Save_Single:
+
+  ret
+  
+;Saves a single image in a multi-image capture action
+vfCompleteAction_Save_Multi:
+
+  ret
+
+
+vfCompleteAction_Print:
+
+  ret
+
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
 

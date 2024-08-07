@@ -312,50 +312,7 @@ MenuHandler_TakeConfirm:
   ;A button pressed: save picture to free slot, then go back to the previous menu state.
   ;Save picture to free slot (saving to free slot assumed there exists a free slot and will fail silently -- check for free space before entering this menu)
 
-    ;Switch to SRAMbank 0 and enable writing to it.
-    ld h,$0A 
-    ld [hl],h ;enable SRAM writes
-    ld h, HIGH(rRAMB) ;2c2b
-    ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
-    ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
-    call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
-    and a
-    jp z, .save_cleanup ;skip saving if FindAndFillFreeSlot returns 0
-
-    dec a
-    ;the bank we want to switch to, held in c, should be 1 + (slot index>>1).
-    ;Copy image data to the correct slot
-    bit 0, a
-    ld e, $FF ;if slot index is even
-    jr z,:+
-    ld e, $0F     ;if slot index is odd, set the value to add/sub from HIGH(src/dest pointer) to $0F. Otherwise, use -1 (FF)
-  :
-  ;shift right and add 1 to get the bank number
-  srl a
-  inc a
-  ld c,a ;the transfer function takes the SRAM bank number in c
-  call SaveCaptureDataFromSRAM0
-
-
-  ;SaveCaptureDataFromSRAM0 ends with the bank we want to write to already selected
-  ;if e is unchanged by this function, we can use it to decide whether we should go with AE00 or BE00
-  ld hl, $AE00
-  inc e ;this is 0 if e is FF (index is even -- we want to pass AE00)
-  jp z, :+
-  ;if it's not FF, index is odd -- we want to pass BE00
-  ld h, $BE
-  ;load HL as either AE00 or BE00
-  :call GenerateThumbnail
-
-  ;Now that we've saved, update the vertical UI buffer with the new free value
-  ld hl, SAVE_SLOTS_FREE
-  ld de, UIBuffer_Vertical+2
-  call UpdateByteInTilemap
-
-  .save_cleanup
-  ld h,$00
-  ld [hl],h ; disable SRAM writes
-
+  call SaveToFreeSlot
   jp .exit_take_confirm_menustate ;don't fall through to check for B button when the A button was already pressed
 
   .check_b: ; check B BUTTON
@@ -594,6 +551,9 @@ InitMenuState_TakeConfirm:
   ld a,[SAVE_SLOTS_FREE] ;Only enter this state if the number of free entries is non-zero
   and a
   ret z ;return silently if there are no free slots
+
+  ld a,VF_ACTION_TAKE_SINGLE
+  ldh [vfNextAction],a
   ld a, MENU_STATE_TAKE_CONFIRM
   ldh [MENU_STATE], a
   call MoveCursorSpriteToNowhere ;We will need to undo this upon EXITING the Take_Confirm menustate
@@ -607,6 +567,9 @@ InitMenuState_TakeConfirm:
 InitMenuState_Settings:
   ld a, MENU_STATE_SETTINGS
   ldh [MENU_STATE],a
+
+  ld a, VF_ACTION_TAKE_SINGLE
+  ldh [vfNextAction],a
 
   xor a
   ldh [SettingsPosition],a
@@ -942,7 +905,7 @@ ModifyEdgeMode_UI:
 ;Clobbers hl, b, a
 ;arg c: dest bank number to copy to
 ;arg e: value to add to HIGH(src pointer) to get dest pointer: $0F for B0 (odd-numbered slot) or $FF for A0 (even-numbered slot)
-SaveCaptureDataFromSRAM0:
+SaveCaptureDataFromSRAM0::
 ld d,HIGH(rRAMB) ;d: location of the SRAM switching write
 ld h, $A1 ; hl: source pointer and starting point for dest pointer. If the bank to write to is even, we subtract 1 from A1 to get A0. If it's odd, we add 0F to get B0
 ld l, $00
@@ -1087,7 +1050,7 @@ ret
   prior to calling, bankswitch to the correct bank and load the source/dest pointers
   Since I don't understand how thumbnails are generated, I will just copy a pixel from each of the 4x4-pixel areas into the thumbnail
 */
-GenerateThumbnail:
+GenerateThumbnail::
   ;hl is passed in as AE00 or BE00
   ;c is our y-value "loop variable." Every 16 y-values, instead of resetting the pointer to the beginning of the line, reset it to the beginning of the NEXT row of tiles
   ld c, $00
