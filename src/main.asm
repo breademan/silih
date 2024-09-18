@@ -85,13 +85,17 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   Setting_DelayTime:: db
   Setting_TimerEnable:: db
   Setting_OnTakeAction:: db
+
+  ;2 bytes
+  BurstShotRemainingCaptures: db
+  BurstShotCurrentCapture: db
   
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
   UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
-  ;Cumulative $E0 bytes
-  ;$18 bytes remaining
+  ;Cumulative $E2 bytes
+  ;$16 bytes remaining
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -288,7 +292,19 @@ ActionInit_TakeSingle:
 ret
 
 ActionInit_Burst:
-  ;TODO
+  
+  ld a,[Setting_AEB_Count]
+  ld [BurstShotRemainingCaptures],a ;Set BurstShotRemainingCaptures to Setting_AEB_Count
+
+  xor a
+  ld [BurstShotCurrentCapture],a ;Set BurstShotCurrentCapture to 0
+  
+  call CalculateBurstExposure   ;TODO: Modify capture parameters
+  call StartCapture
+  ld a,VF_STATE_CAPTURING
+  ldh [viewfinder_state],a
+
+
 ret
 
 
@@ -398,12 +414,38 @@ DMAHandler:
   jp ViewfinderChecks
 
     .transfer_complete
-   
-    ld a, VF_STATE_TRANSITION
-    ldh [viewfinder_state], a
+    ld a,[vfCurrentAction]
+    cp a,VF_ACTION_BURST  ;If currentAction is viewfinder, just set viewfinder_state to VF_STATE_TRANSITION and move on
+    jr nz, .notInBurst  ;If currentAction VF_ACTION_TAKE_SINGLE (impossible, as vfActionTransition will never cause this), do the same
+    .inBurst
+      ;if doing a burst shot, save/print/transfer, decrement remaining shot counter, increment current shot number. 
+      call vfCompleteAction
+      ld hl,BurstShotCurrentCapture
+      inc [hl]
+      ld hl,BurstShotRemainingCaptures
+      dec [hl]
+      jp z,.burstComplete
+      .burstIncomplete ;If nonzero, change camera parameters and restart capture, next state is Capturing.
+        ;TODO: Change capture parameters
+        call StartCapture
+        ld a, VF_STATE_CAPTURING
+        ldh [viewfinder_state],a
+      jp ViewfinderChecks
+
+      .burstComplete       ;If zero, set next action to viewfinder, and next state is Transition.
+        ld a,VF_ACTION_VIEWFINDER
+        ld [vfNextAction],a
+
+        ld a, VF_STATE_TRANSITION
+        ldh [viewfinder_state],a
+
+      jp ViewfinderChecks
+    jp ViewfinderChecks
+  .notInBurst
+      ld a, VF_STATE_TRANSITION
+      ldh [viewfinder_state], a
     jp ViewfinderChecks
 
-  jp ViewfinderChecks
 
 PauseHandler:
   ;When menustate is SELECTED, restart capture
@@ -411,7 +453,7 @@ PauseHandler:
   cp a,MENU_STATE_SELECTED
   jp nz, ViewfinderChecks;if carry, we're in one of the camera states where viewfinder is active and need to restart the capture + change viewfinder state
   
-  call StartCapture  
+  call StartCapture
   ld a, VF_STATE_CAPTURING
   ldh [viewfinder_state], a
   jp ViewfinderChecks
@@ -1565,10 +1607,35 @@ SaveToFreeSlot::
   ld [hl],h ; disable SRAM writes
 ret
 
-;Depending on the current action, either saves or prints
+;Depending on the current action, either saves or prints.
 vfCompleteAction:
+  ;if setting = TAKE_ACTION_SAVE and the currentAction takes multiple pictures, call vfCompleteAction_Save_Multi
+  ld a,[Setting_OnTakeAction]
+  and a
+  ;if setting = 0 = TAKE_ACTION_SAVE
+  jr nz,.printCheck
+  jp vfCompleteAction_Save_Multi ;Note: we use jp here because it's smaller than call->ret-from-callee->ret : callee just RETs to vfCompleteAction's caller
 
-  ret
+  .printCheck
+  dec a
+  jr nz,.savePrintCheck
+  jp vfCompleteAction_Print
+
+  .savePrintCheck
+  dec a
+  jr nz,.xferCheck
+  call vfCompleteAction_Save_Multi
+  jp vfCompleteAction_Print
+
+  .xferCheck
+  dec a
+  jr nz,.invalidTakeAction
+  jp vfCompleteAction_Xfer
+
+  .invalidTakeAction
+  ;TODO: throw an ERROR
+
+ret
 
 
 ;Saves a single image
@@ -1578,11 +1645,18 @@ vfCompleteAction_Save_Single:
   
 ;Saves a single image in a multi-image capture action
 vfCompleteAction_Save_Multi:
+  call SaveToFreeSlot
+  ret
+
+vfCompleteAction_Print:
 
   ret
 
+vfCompleteAction_Xfer:
 
-vfCompleteAction_Print:
+  ret
+
+CalculateBurstExposure::
 
   ret
 

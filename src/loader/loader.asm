@@ -26,14 +26,15 @@ launch:
 
     ld hl,$C000 ;start of WRAM
     ld de,PayloadStorage ;start of payload stored in ROM
-.copy_payload_wram0 ; for now, only copy C000-CFFF. Later, we may extend it to cover both banks
+.copy_payload_wram0
     ld  a,[de]
     inc de
     ld  [hl+],a
     bit 4,h
     jr z,.copy_payload_wram0
 
-    ;counter for WRAM bank -- finishes when RAMbank becomes 7 (7 is a real RAM bank, but we don't want to have to ROMbank switch)
+    ;counter for WRAM bank -- finishes when RAMbank becomes 7 
+    ;(7 is a real RAM bank, but we don't want to go out of the 32K ROM space)
         ;Quits when d is $80 aka d's bit 7 is set
     ld de, $2000 ; de: source data -- each RAMbank is $1000 in size
     xor a

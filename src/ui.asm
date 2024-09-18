@@ -6,7 +6,7 @@ SECTION "Payload UI Data SECTION",ROM0[$1000 + ($1000*UI_RAMBANK)]
 UIStorage::
     LOAD "Payload UI Data LOAD", WRAMX [$D000]
 UIJumpTable: ;14 bytes
-dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm, MenuHandler_Settings
+dw MenuHandler_CameraOpts, MenuHandler_DitherOptions, MenuHandler_Selected, MenuHandler_TakeConfirm, MenuHandler_Gallery, MenuHandler_DeleteConfirm, MenuHandler_Settings, MenuHandler_BurstShot
 
   ;determines what happens when you press up/down to modify a value during MENU_SELECTED menustate
 ChangeOptionHandler_table:
@@ -74,7 +74,7 @@ SidebarArrangementSelected:
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
   db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_UP, PROMPT_SELECT;Cart Handover: select+up
   .end
-ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
+ASSERT SidebarArrangementSelected.end - SidebarArrangementSelected <= 52, "SidebarArrangementSelected is too large"
 
 SidebarArrangementTakeConfirm:
   db (SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm) - 1 ;size of this data structure -- this should really be a struct
@@ -85,8 +85,15 @@ SidebarArrangementTakeConfirm:
   db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_B;Cancel: B button
   .end
 
-  ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementViewfinder is too large"
+  ASSERT SidebarArrangementTakeConfirm.end - SidebarArrangementTakeConfirm <= 52, "SidebarArrangementTakeConfirm is too large"
 
+SidebarArrangementBurstShot:
+db (SidebarArrangementBurstShot.end - SidebarArrangementBurstShot) - 1 ;size of this data structure -- this should really be a struct
+db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+.end
+
+ASSERT SidebarArrangementBurstShot.end - SidebarArrangementBurstShot <= 52, "SidebarArrangementBurstShot is too large"
 
 HandleInput::
     ldh a, [MENU_STATE]
@@ -277,8 +284,18 @@ MenuHandler_Selected:
   .check_a:
   bit JOYPAD_A,b
   jp z,.check_b
-  call InitMenuState_TakeConfirm
-  jp .buttons_end ;we don't want to do any other state transitions if we transition to CameraOpts, so skip the other button checks
+
+  ;Check whether burst shot setting is set. If it is, initiate its appropriate menustate and signal to the viewfinder to start a burst shot.
+  ;Remember that for burst shots, you can't use an already-initiated capture -- you need to set the capture parameters first, then take them.
+
+  ld a,[Setting_AEB]
+  and a
+  jr z,:+
+    call InitMenuState_BurstShot
+    jp .buttons_end
+  :
+    call InitMenuState_TakeConfirm
+    jp .buttons_end ;we don't want to do any other state transitions if we transition to CameraOpts, so skip the other button checks
 
   .check_b:
   bit JOYPAD_B, b
@@ -472,6 +489,22 @@ call DrawSettings
 
 jp HandleInputDone
 
+
+MenuHandler_BurstShot:
+;Don't do anything until the burst shot is finished
+; If current action is burst, wait for it to finish.
+ld a,[vfCurrentAction]
+cp a,VF_ACTION_BURST
+jp z, HandleInputDone
+;If current action isn't burst, then next action should be.
+ld a,[vfNextAction]
+cp a,VF_ACTION_BURST
+jp z, HandleInputDone
+
+;If neither current nor next action is burst, either it's finished or something has gone wrong.
+;Either way, transition to the Selected state
+call InitMenuState_Selected
+jp HandleInputDone
 ;----------------------Functions---------------------------
 ; These are called when entering and returning to menu states
 
@@ -559,6 +592,26 @@ InitMenuState_TakeConfirm:
   call MoveCursorSpriteToNowhere ;We will need to undo this upon EXITING the Take_Confirm menustate
   
   ld hl, SidebarArrangementTakeConfirm   ;Fill sidebar buffer with new prompts
+  call PrepareSidebar
+
+  call SetBGPalette0to1
+  ret
+
+InitMenuState_BurstShot:
+
+  ld a,[Setting_AEB_Count]
+  ld c,a
+  ld a,[SAVE_SLOTS_FREE] ;Only enter this state if the number of free entries is GTE the number of shots you're supposed to take
+  cp a,c ;count - free: if z, OK. If carry, count > free, and we should return
+  ret c ;return silently if there are not enough free slots
+
+  ld a,VF_ACTION_BURST
+  ldh [vfNextAction],a
+  ld a, MENU_STATE_BURST_SHOT
+  ldh [MENU_STATE], a
+  call MoveCursorSpriteToNowhere ;We will need to undo this upon exiting the BurstShot menustate / entering the Selected menustate
+  
+  ld hl, SidebarArrangementBurstShot   ;Fill sidebar buffer with new prompts
   call PrepareSidebar
 
   call SetBGPalette0to1
