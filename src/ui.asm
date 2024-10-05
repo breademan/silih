@@ -56,6 +56,11 @@ OnTakeActionStrings:
     db "S PR"
     db "XFER"
 
+ModeStrings:
+    db "ONE "
+    db "BRST"
+    db "AEB "
+
 SidebarArrangementViewfinder:
   db (SidebarArrangementViewfinder.end - SidebarArrangementViewfinder) - 1 ;size of this data structure -- this should really be a struct
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
@@ -73,6 +78,8 @@ SidebarArrangementSelected:
   db ACTION_TAKEPHOTO, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_A ;Take photo: A button
   db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
   db ACTION_HANDOVER, BLANK_TILE_ID, PROMPT_UP, PROMPT_SELECT;Cart Handover: select+up
+  db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+  db ACTION_OPTIONS, BLANK_TILE_ID, BLANK_TILE_ID, PROMPT_START;Settings: start
   .end
 ASSERT SidebarArrangementSelected.end - SidebarArrangementSelected <= 52, "SidebarArrangementSelected is too large"
 
@@ -90,7 +97,7 @@ SidebarArrangementTakeConfirm:
 SidebarArrangementBurstShot:
 db (SidebarArrangementBurstShot.end - SidebarArrangementBurstShot) - 1 ;size of this data structure -- this should really be a struct
 db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
-db ACTION_RETURN, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
+db BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID, BLANK_TILE_ID
 .end
 
 ASSERT SidebarArrangementBurstShot.end - SidebarArrangementBurstShot <= 52, "SidebarArrangementBurstShot is too large"
@@ -288,7 +295,7 @@ MenuHandler_Selected:
   ;Check whether burst shot setting is set. If it is, initiate its appropriate menustate and signal to the viewfinder to start a burst shot.
   ;Remember that for burst shots, you can't use an already-initiated capture -- you need to set the capture parameters first, then take them.
 
-  ld a,[Setting_AEB]
+  ld a,[Setting_Burst_AEB]
   and a
   jr z,:+
     call InitMenuState_BurstShot
@@ -609,7 +616,7 @@ InitMenuState_BurstShot:
   ldh [vfNextAction],a
   ld a, MENU_STATE_BURST_SHOT
   ldh [MENU_STATE], a
-  call MoveCursorSpriteToNowhere ;We will need to undo this upon exiting the BurstShot menustate / entering the Selected menustate
+  call MoveCursorSpriteToNowhere ;We will undo this upon exiting the BurstShot menustate / entering the Selected menustate
   
   ld hl, SidebarArrangementBurstShot   ;Fill sidebar buffer with new prompts
   call PrepareSidebar
@@ -1244,27 +1251,222 @@ ret
 ; ret
 
 Setting_DelayTime_SetDefault:
-  ld a,[Setting_DelayTime]
   xor a
   ld [Setting_DelayTime],a
 ret
 
-Setting_AEB_Toggle:
-  ld a,[Setting_AEB]
-  xor a,$01
-  ld [Setting_AEB],a
+Setting_Burst_AEB_SetDefault:
+  xor a
+  ld [Setting_Burst_AEB],a
+  call Setting_Burst_AEB_Sanitize
 ret
 
 Setting_AEB_Count_SetDefault:
-  ld a,[Setting_AEB_Count]
+  ld hl,Setting_AEB_Count
+
+  ld a,[Setting_Burst_AEB]
+  cp a,CAMERA_MODE_AEB  
   ld a,$01
-  ld [Setting_AEB_Count],a
+  jr nz,:+ ;if we're not in AEB mode, set count to 1
+  ld a,$03 ;If we're in AEB mode, set count to 3
+
+  :ld [hl],a
+
+
 ret
 
 Setting_AEB_Interval_SetDefault:
   ld a,[Setting_AEB_Interval]
-  ld a,$10
+  ld a,$03
   ld [Setting_AEB_Interval],a
+  call Setting_AEB_Interval_Sanitize
+ret
+
+; @arg a: max
+; @arg b: min
+; @arg hl: address of variable
+; @clobber none
+IncByteWithWraparound:
+  cp a, [hl] ;if a = max, set to min
+  jr z,:+
+    inc [hl] ;value isn't at max? increment and return
+    ret
+  :
+    ld [hl], b
+ret
+
+; @arg a: min
+; @arg b: max
+; @arg hl: address of variable
+; @clobber none
+DecByteWithWraparound:
+  cp a, [hl] ;if a = min, set to max
+  jr z,:+
+    dec [hl] ;value isn't at min? dec and return
+    ret
+  :
+    ld [hl], b
+ret
+
+Setting_OnTakeAction_Inc:
+  ld hl, Setting_OnTakeAction_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_OnTakeAction
+  call IncByteWithWraparound
+ret
+
+Setting_OnTakeAction_Dec:
+  ld hl, Setting_OnTakeAction_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_OnTakeAction
+  call DecByteWithWraparound
+ret
+
+Setting_AEB_Interval_Inc:
+  ld hl, Setting_AEB_Interval_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_AEB_Interval
+  call IncByteWithWraparound
+  call Setting_AEB_Interval_Sanitize
+ret
+
+Setting_AEB_Interval_Dec:
+  ld hl, Setting_AEB_Interval_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_AEB_Interval
+  call DecByteWithWraparound
+  call Setting_AEB_Interval_Sanitize
+ret
+
+Setting_AEB_Count_Inc:
+  ld hl, Setting_AEB_Count_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_AEB_Count
+  call IncByteWithWraparound
+  
+  ;If mode is AEB(2), bounds-check it's gte $03
+  ld a,[Setting_Burst_AEB]
+  cp a,$02
+  ret nz
+  .aebSet
+  ;If AEB is set, keep incrementing-with-wraparound until it's an odd number above 3
+  ;if it's under 3, set it to 3 and return.
+  ld a,[hl]
+  cp a,$03 ;count - 3: no carry: in-bounds. Zero: in-bounds. carry: out-of-bounds, set to 3 and return
+  jr c,.outOfBounds
+  .inBounds
+    ;if count >= 3, make it odd by setting bit 0
+    set 0,[hl]
+    ret
+  .outOfBounds
+    ld a,$03
+    ld [hl],a
+ret
+
+
+Setting_AEB_Count_Dec:
+  ld hl, Setting_AEB_Count_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_AEB_Count
+  call DecByteWithWraparound
+  
+  ;If mode is AEB(2), bounds-check it's gte $03
+  ld a,[Setting_Burst_AEB]
+  cp a,$02
+  ret nz
+  .aebSet
+  ;If AEB is set, keep incrementing-with-wraparound until it's an odd number above 3
+  ;if it's under 3, set it to 0F (DecByteWithWraparound won't roll over to 0F since it's not reached the min yet) and return.
+  ld a,[hl]
+  cp a,$03 ;count - 3: no carry: in-bounds. Zero: in-bounds. carry: out-of-bounds, set to 3 and return
+  jr c,.outOfBounds
+  .inBounds
+    ;if count >= 3, make it odd by setting bit 0
+    dec [hl]
+    set 0,[hl]
+    ret
+  .outOfBounds
+    ld a,$0F
+    ld [hl],a
+ret
+
+Setting_DelayTime_Inc:
+  ld hl, Setting_DelayTime_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_DelayTime
+  call IncByteWithWraparound
+ret
+
+Setting_DelayTime_Dec:
+  ld hl, Setting_DelayTime_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_DelayTime
+  call DecByteWithWraparound
+ret
+
+Setting_Burst_AEB_Inc:
+  ld hl, Setting_Burst_AEB_Min+1
+  ld a,[hld] ;max in a
+  ld b,[hl]  ;min in b
+  ld hl, Setting_Burst_AEB
+  call IncByteWithWraparound
+  call Setting_Burst_AEB_Sanitize
+ret
+
+Setting_Burst_AEB_Dec:
+  ld hl, Setting_Burst_AEB_Min
+  ld a,[hli] ;min in a
+  ld b,[hl]  ;max in b
+  ld hl, Setting_Burst_AEB
+  call DecByteWithWraparound
+  call Setting_Burst_AEB_Sanitize
+ret
+
+;This is called when the
+Setting_Burst_AEB_Sanitize:
+  ld a,[Setting_Burst_AEB]
+  ;When the mode is changed,
+  and a
+  jr nz,.burstCheck
+  ;If it's Single (0),
+    ret
+  .burstCheck
+  dec a
+  jr nz,.aebCheck
+  ;If it's Burst(1), set INTERVAL to 0 (it should stay this way while Burst is set)
+    xor a
+    ld [Setting_AEB_Interval],a
+    ret
+  .aebCheck
+  dec a
+  jr nz,.otherCheck
+  ;If it's AEB(2), reset COUNT to 3 (an odd number that's not 1), and SHIFT to 3
+    ld a,$03
+    ld [Setting_AEB_Count],a
+    ld [Setting_AEB_Interval],a
+    ret
+  .otherCheck
+  ;If we reach here, Setting_Burst_AEB has an out-of-bounds value
+
+ret
+
+
+;If modifying AEB interval, it should be stuck at zero if the mode is burst
+;@arg hl: Address of Setting_AEB_Interval
+Setting_AEB_Interval_Sanitize:
+  ld a,[Setting_Burst_AEB]
+  dec a ; z if shot mode is 1 (burst). If mode isn't burst, return: we 
+  ret nz
+  xor a
+  ld [hl],a ; Set Interval to 00
 ret
 
 Init_PrintAll:
@@ -1282,11 +1484,11 @@ ret
 
 ;Draws the various settings using dedicated functions
 DrawSettings:
-  ;TODO replace with X macro
+  ;TODO replace with X macro -- currently, they are limited to \1-\9
   call DrawSetting_SerialRemote
   call DrawSetting_OnTakeAction
   call DrawSetting_DelayTime
-  call DrawSetting_AEB
+  call DrawSetting_Burst_AEB
   call DrawSetting_AEB_Count
   call DrawSetting_AEB_Interval
 
@@ -1351,12 +1553,27 @@ DrawSetting_DelayTime:
 
 ret
 
-DrawSetting_AEB:
-  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,3,HL
-  ld a,[Setting_AEB]
-  add a,CHECKBOX_TILE_ID_DIS
-  ld b,a
-  call DrawTileInHBlank
+; DrawSetting_Burst_AEB:
+;   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,3,HL
+;   ld a,[Setting_Burst_AEB]
+;   add a,CHECKBOX_TILE_ID_DIS
+;   ld b,a
+;   call DrawTileInHBlank
+; ret
+
+DrawSetting_Burst_AEB:
+  ld hl, ModeStrings ;each entry is 4 bytes long (does not need to be byte-addr-aligned)
+  ld a,[Setting_Burst_AEB]
+  add a,a
+  add a,a ;multiply by 4 for 4-byte entries
+
+	ld d, 0 ; add a into hl: 4 bytes, 5 cycles
+	ld e, a
+	add hl, de
+
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,3,de
+  call DrawFourTilesInHBlank
+
 ret
 
 DrawSetting_AEB_Count:
@@ -1374,7 +1591,7 @@ DrawSetting_AEB_Interval:
   swap a
   and a,$0F
   add a,UI_ICONS_BASE_ID
-  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,5,hl
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 18,5,hl
   ld b,a
   call DrawTileInHBlank
 
@@ -1382,11 +1599,6 @@ DrawSetting_AEB_Interval:
   and a,$0F
   add a,UI_ICONS_BASE_ID
   ld b,a
-  call DrawTileInHBlank
-  ;Draw 00 as the last 2 bytes
-
-  ld b,UI_ICONS_BASE_ID
-  call DrawTileInHBlank
   call DrawTileInHBlank
 
 ret
@@ -1447,94 +1659,6 @@ DrawFourTilesInHBlank:
 ret
 
 
-; @arg a: max
-; @arg b: min
-; @arg hl: address of variable
-; @clobber a
-IncByteWithWraparound:
-  cp a, [hl] ;if a = max, set to min
-  jr z,:+
-    inc [hl] ;value isn't at max? increment and return
-    ret
-  :
-    ld [hl], b
-ret
 
-; @arg a: min
-; @arg b: max
-; @arg hl: address of variable
-; @clobber a
-DecByteWithWraparound:
-  cp a, [hl] ;if a = min, set to max
-  jr z,:+
-    dec [hl] ;value isn't at min? dec and return
-    ret
-  :
-    ld [hl], b
-ret
-
-Setting_OnTakeAction_Inc:
-  ld hl, Setting_OnTakeAction_Min+1
-  ld a,[hld] ;max in a
-  ld b,[hl]  ;min in b
-  ld hl, Setting_OnTakeAction
-  call IncByteWithWraparound
-ret
-
-Setting_OnTakeAction_Dec:
-  ld hl, Setting_OnTakeAction_Min
-  ld a,[hli] ;min in a
-  ld b,[hl]  ;max in b
-  ld hl, Setting_OnTakeAction
-  call DecByteWithWraparound
-ret
-
-Setting_AEB_Interval_Inc:
-  ld hl, Setting_AEB_Interval_Min+1
-  ld a,[hld] ;max in a
-  ld b,[hl]  ;min in b
-  ld hl, Setting_AEB_Interval
-  call IncByteWithWraparound
-ret
-
-Setting_AEB_Interval_Dec:
-  ld hl, Setting_AEB_Interval_Min
-  ld a,[hli] ;min in a
-  ld b,[hl]  ;max in b
-  ld hl, Setting_AEB_Interval
-  call DecByteWithWraparound
-ret
-
-Setting_AEB_Count_Inc:
-  ld hl, Setting_AEB_Count_Min+1
-  ld a,[hld] ;max in a
-  ld b,[hl]  ;min in b
-  ld hl, Setting_AEB_Count
-  call IncByteWithWraparound
-ret
-
-Setting_AEB_Count_Dec:
-  ld hl, Setting_AEB_Count_Min
-  ld a,[hli] ;min in a
-  ld b,[hl]  ;max in b
-  ld hl, Setting_AEB_Count
-  call DecByteWithWraparound
-ret
-
-Setting_DelayTime_Inc:
-  ld hl, Setting_DelayTime_Min+1
-  ld a,[hld] ;max in a
-  ld b,[hl]  ;min in b
-  ld hl, Setting_DelayTime
-  call IncByteWithWraparound
-ret
-
-Setting_DelayTime_Dec:
-  ld hl, Setting_DelayTime_Min
-  ld a,[hli] ;min in a
-  ld b,[hl]  ;max in b
-  ld hl, Setting_DelayTime
-  call DecByteWithWraparound
-ret
 
 ENDL

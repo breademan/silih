@@ -72,6 +72,9 @@ InitVariables:
   ld a, $01
   ld [ShowPromptsFlag], a
 
+  ld a,$03
+  ld [CamOptEdgeMode],a
+
 
 InitSettings:
   MACRO X

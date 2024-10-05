@@ -9,8 +9,10 @@ Currently, it is missing several important features.
 - Modify the camera registers and contrast setting
 - Take a picture
 - Remote control over the link cable
+- Burst shot and AEB (Automatic Exposure Bracketing) mode
 
 ## Planned Features
+- Printing support
 - Gallery to view and delete pictures
 - Autoexposure
 - Assisted mode similar to Photo!
@@ -24,10 +26,11 @@ When you see the screen that says "Press A to play," carefully remove the flash 
 If for some reason you want to run it in an emulator, only some emulators support both the Game Boy Camera AND yanking Game Paks while the game is running. BGB or Sameboy are recommended.
 
 ## Controls
-- __A__: Take a photo. Once the viewfinder has stopped changing, pressing B again will save the picture, and pressing A will discard it.
+- __A__: Take a photo. In single-shot mode, pressing A again will save the picture, and pressing B will discard it.
 - __Select+Up__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+DOWN. 
+- __Start__: Settings menu.
 
-## Option values
+## Camera Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.
 - __M__: Selects the edge enhancement mode (0: None, 1: Horizontal, 2: Vertical, or 3: 2D) using camera registers N and VH.
 - __C__: Exposure Time (in steps of 16μS). Determines how long the sensor collects light before being read out.
@@ -37,6 +40,16 @@ The camera registers are best described in [the readme for Photo!](https://githu
 - __V__: Output node bias voltage (Vref), in steps of 0.5V. The original software always sets this to 3 (1.5V). In practice, increasing this value leads to all pixels looking 'brighter' to the MAC-GBD chip. Changing this may set the voltage the sensor outputs outside of the range of the MAC-GBD's analog-to-digital converter.
 - __Contrast__: Determines what values are used in the dither table and how close together the values are to each other.
 - __Dither Table__: The ROM has 3 tables of base values used for dithering: 0 for low light conditions, 1 for high light conditions, and 2 unused.
+
+## Settings
+Most settings are currently unimplemented.
+- __Serial Remote__: If checked, SILIH will listen for remote control button presses over the link port.
+- __On Take__: Determines what will happen when a photo is taken. Only "save" is currently implemented.
+- __Mode__: Single shot, burst shot, or AEB (Automatic Exposure Bracketing). AEB mode will take an equal number of overexposed and underexposed shots for higher dynamic range.
+- __Shot Count__: Number of photos to take in Burst or AEB mode. For AEB mode, this is restricted to odd numbers.
+- __AEB Shift__: In AEB mode, affects the amount added or subtracted to get the exposure time (C) of the next shot. A higher AEB shift means a smaller AEB step.  
+1 = ±50%, 2 = ±25%, 3 = ±12.5%, 4 = ±6.25%, 5 = ±3.125%.
+- All other settings are non-functional.
 
 ## Remote Controller
 Silihcam can be controlled remotely by another Game Boy over the link cable port. This is useful for taking stabilized shots.\

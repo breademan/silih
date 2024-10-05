@@ -15,14 +15,10 @@ OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are a
 ;OptionLinesBuffer is HDMA'd, meaning it must be aligned on 16bytes
 NEXTU
 DS 20
-;Insert variables here, 12 bytes
-DS 20
-;Insert more variables here,12 bytes
-ENDU
 ;Previously had to be placed in UI order for UpdateValsMap_WRAM, but it no longer cares.
 ;PrepareCameraOpts doesn't care about their in-memory order, so it should be safe to move them around otherwise.
 ;8 bytes
-CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
+  CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptVH_RAM: db
   CamOptC_RAM:: ;CamOptC_RAM is stored in little-endian order, inconsistent with the CAM registers, but easily updated by modify_nybble
     CamOptC_RAM_L: db 
@@ -37,6 +33,10 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   CamOptDitherTable:: db ;selects whether to use light or dark dither table. 0=light (sramA:7c20), 1=dark (sramA:7c60)
   CamOptDitherPattern:: db
   CamOptEdgeMode:: db ;Meta-option that modifies NVH
+DS 20
+;Insert more variables here,12 bytes
+ENDU
+
   ;These variables are downstream of the above individual CamOpt variables. UpdateCameraOpts uses these contiguously and with CamOptDither_RAM, so they must be contiguous
   ; 5 + 48 bytes
   CamOptA001_RAM:: db
@@ -78,13 +78,13 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
   ;7 bytes
-  Setting_SerialRemote:: db 
-  Setting_AEB_Interval:: db
-  Setting_AEB_Count:: db
-  Setting_AEB:: db
+  Setting_SerialRemote:: db ;When set, enables serial remote control.
+  Setting_AEB_Interval:: db ;AEB shift: each AEB step either adds or subtracts previousExposure/(2 to the power of this value)
+  Setting_AEB_Count:: db  ;Burst shot / AEB count: how many captures are taken if in Burst/AEB mode.
+  Setting_Burst_AEB:: db  ;Camera mode: determines whether we're taking a single, burst, or AEB shot. Values are set by CAMERA_MODE_xxx 
   Setting_DelayTime:: db
   Setting_TimerEnable:: db
-  Setting_OnTakeAction:: db
+  Setting_OnTakeAction:: db ;OnTakeAction: determines what happens when a capture is completed and user confirms (for single shot), and when a capture is completed (in burst/AEB mode)
 
   ;2 bytes
   BurstShotRemainingCaptures: db
@@ -93,9 +93,14 @@ CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
   ;16 bytes
   GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
+  ;56 bytes
   UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
-  ;Cumulative $E2 bytes
-  ;$16 bytes remaining
+  BurstExposureList: ds $1E ; Stored little-endian, same as CamOptC_RAM, opposite of CamOptA00x
+                            ; to hold $0F C-values, we need $0F * 2 bytes
+  ;Cumulative $F4 bytes
+  ;$0C bytes remaining
+  .endVariables
+assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
 
 SECTION "Payload SECTION",ROM0[$1000]
@@ -242,6 +247,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 
 ;----------------------------- Event handlers------------------------------------------------------
 IdleHandler: ;Start a capture, change state to capturing
+  call PrepareCameraOpts
   call StartCapture
   ld a, VF_STATE_TRANSITION
   ldh [viewfinder_state], a
@@ -277,6 +283,7 @@ vfActionTransition:
 jp ViewfinderChecks
 
 ActionInit_Viewfinder:
+  call PrepareCameraOpts
   call StartCapture
 
   ld a,VF_ACTION_VIEWFINDER
@@ -298,8 +305,20 @@ ActionInit_Burst:
 
   xor a
   ld [BurstShotCurrentCapture],a ;Set BurstShotCurrentCapture to 0
-  
-  call CalculateBurstExposure   ;TODO: Modify capture parameters
+
+  call PrepareCameraOpts
+
+  ld a,[Setting_Burst_AEB]
+  cp a,CAMERA_MODE_AEB
+  jr nz,:+
+  call FillAEBList   ;Populate the AEB list with C-values if we're doing an AEB shot
+  call GetAEBExposure   ;Modify capture parameters
+  ld a,h
+  ld [CamOptA002_RAM],a
+  ld a,l
+  ld [CamOptA003_RAM],a
+  :
+
   call StartCapture
   ld a,VF_STATE_CAPTURING
   ldh [viewfinder_state],a
@@ -416,8 +435,8 @@ DMAHandler:
     .transfer_complete
     ld a,[vfCurrentAction]
     cp a,VF_ACTION_BURST  ;If currentAction is viewfinder, just set viewfinder_state to VF_STATE_TRANSITION and move on
-    jr nz, .notInBurst  ;If currentAction VF_ACTION_TAKE_SINGLE (impossible, as vfActionTransition will never cause this), do the same
-    .inBurst
+    jr nz, .notInBurstAEB  ;If currentAction VF_ACTION_TAKE_SINGLE (impossible, as vfActionTransition will never cause this), do the same
+    .inBurstAEB
       ;if doing a burst shot, save/print/transfer, decrement remaining shot counter, increment current shot number. 
       call vfCompleteAction
       ld hl,BurstShotCurrentCapture
@@ -426,7 +445,20 @@ DMAHandler:
       dec [hl]
       jp z,.burstComplete
       .burstIncomplete ;If nonzero, change camera parameters and restart capture, next state is Capturing.
-        ;TODO: Change capture parameters
+        ;Change capture parameters if in AEB mode
+        call PrepareCameraOpts
+
+        ld a,[Setting_Burst_AEB]
+        cp a,CAMERA_MODE_AEB
+        jr nz,:+
+          call FillAEBList   ;Populate the AEB list with C-values if we're doing an AEB shot
+          call GetAEBExposure   ;Modify capture parameters
+          ld a,h
+          ld [CamOptA002_RAM],a
+          ld a,l
+          ld [CamOptA003_RAM],a
+        :
+    
         call StartCapture
         ld a, VF_STATE_CAPTURING
         ldh [viewfinder_state],a
@@ -441,7 +473,7 @@ DMAHandler:
 
       jp ViewfinderChecks
     jp ViewfinderChecks
-  .notInBurst
+  .notInBurstAEB
       ld a, VF_STATE_TRANSITION
       ldh [viewfinder_state], a
     jp ViewfinderChecks
@@ -452,7 +484,7 @@ PauseHandler:
   ldh a, [MENU_STATE]
   cp a,MENU_STATE_SELECTED
   jp nz, ViewfinderChecks;if carry, we're in one of the camera states where viewfinder is active and need to restart the capture + change viewfinder state
-  
+  call PrepareCameraOpts
   call StartCapture
   ld a, VF_STATE_CAPTURING
   ldh [viewfinder_state], a
@@ -461,10 +493,12 @@ PauseHandler:
 
 ;------------------------------------------------------------------------------
 ;Functions
+;------------------------------------------------------------------------------
+
+;Before calling, make sure to update shadow camopt registers with PrepareCameraOpts
 StartCapture:
     ld a, $10
     ld [rRAMB], a ; switch to GB Camera register
-    call PrepareCameraOpts ; calling PrepareCameraOpts here instead of after a change to a camera option increases the latency between captures every time. Calling it only on changes increases latency only when you change it.
     call UpdateCameraOpts
     ld a, %00000011 ;Start capture
     ld [$A000], a
@@ -1656,9 +1690,158 @@ vfCompleteAction_Xfer:
 
   ret
 
-CalculateBurstExposure::
+;returns de rightshifted a times
+;clobbers de, a, leaves a at 0
+rshift16: ;(a: number of right shifts, de: value to shift)
+  .loop
+  sra d
+  rr	e
+  dec a
+  jr nz, .loop
+ret
+  
+;@param hl: currentValue
+;@param a: number of shifts
+;@clobber: a,hl
+;@return: next element up in the sequence currentValue + currentValue>>a, clipped to $FFFF
+NextElementGeometric_Add:
+  push de
+  ld d,h
+  ld e,l
+  call rshift16
+  add hl,de
+  pop de
+  ;Check for overflow
+  ret nc ;if the last add caused a carry, we need to alias L back to max
+  ld h,$FF
+  ld l,h
+ret
+  
+;@param hl: currentValue
+;@param a: number of shifts
+;@clobber: a, hl
+;@return: next element up in the sequence currentValue + currentValue>>a, clipped to $FFFF
+NextElementGeometric_Sub: ;(HL: currentValue a:number of shifts)
+  push de
+  ld d,h
+  ld e,l
+  call rshift16
+  ld a,l ;hl = 16-bit subtract de from hl
+  sub e
+  ld l,a
+  ld a,h
+  sbc d
+  ld h,a
+  ;because a geometric sequence of subtraction never subtracts a number as large as itself, you will never get past or indeed TO 0.
+  ;If the minimum value is 0001, you should be able to skip bounds-checking altogether
+  ;if you want to bounds-check, say to ensure it's gte $0100, do this:
+  xor a
+  cp a,h
+  pop de
+  ret nz
+  ld l,a
+  ld h,$01
+
+ret
+
+;Fill the AEB List with a center value, (count-1)/2 overexposed values, and (count-1)/2 underexposed values.
+FillAEBList::
+  .fillCenter
+  ;Assuming odd count, place the center C-value in index (count-1)/2
+  ;find (count-1)/2 and use it as the index for where to put our C-value.
+  ld a,[Setting_AEB_Count]
+  srl a ; a = (count-1)/2. assuming this is odd, the -1 is included in a right-shift
+  add a ; turn this index into an offset by multiplying by 2, since each C-value is 2bytes   ;TODO: the prior parts are superfluous, we can just reset bit 0 to get the same result
+  ld bc, BurstExposureList
+  ;add a to bc to get the address of the entry.
+  ; Since we know BurstExposureList's addresses all have the same high nybble, we can actually just do an 8-bit add to C
+  add a,c
+  ld c,a
+  ;put current c-value (de) into BurstExposureList[(count-1)/2] ([hl]), little-endian
+  ld a,[CamOptC_RAM_L] ;fetch current C-value
+  ld [bc],a ;load lower byte into BurstExposureList + 2*(count-1)/2
+  inc c
+  ld l,a
+  ld a, [CamOptC_RAM_H]
+  ld [bc], a ;load higher byte into BurstExposureList + 2(count-1)/2 + 1
+  inc c
+  ld h,a
+  push hl ;hl = current C-value for use by overexposure and underexposure list
+          ;bc = address: BurstExposureList + 2(count-1)/2 + 2
+  
+  .fillOverexposed
+  ;Then, place overexposed C-values in indices 0 through [(count-1)/2]-1
+  ;initialize counter of overexposed images (count-1)/2
+  ld a,[Setting_AEB_Count]
+  srl a
+  ld d,a ;d = counter (number of overexposed images to take), loop terminates when counter is 0
+  ld a,[Setting_AEB_Interval]
+  ld e,a ;e = number of shifts
+  ;      put counter in d
+  ;          number of shifts in e (passed in via a)
+  ;          current address in bc
+  ;          C-value in hl
+  
+  .fillOverExposedLoop
+    ;before loop, previous C-val is already in HL
+    ld a,e;put number of shifts into a
+    call NextElementGeometric_Add
+    ;put the result, hl, into [bc] (little-endian) and increment it
+    ld a,l
+    ld [bc], a
+    inc c
+    ld a,h
+    ld [bc], a
+    inc c
+    ;decrement counter and check for complete (0)
+    dec d
+    jr nz,.fillOverExposedLoop
+  
+  
+  ;Then, place underxposed C-values in indices ((count-1)/2 + 1) through (count-1)
+  pop hl ;retrieve current C-value into hl
+  ;initialize counter of overexposed images (count-1)/2
+  ld a,[Setting_AEB_Count]
+  srl a
+  ld d,a ;d = counter (number of overexposed images to take), loop terminates when counter is 0
+  ld a,[Setting_AEB_Interval]
+  ld e,a ;e = number of shifts
+  ;      put counter in d
+  ;          number of shifts in e (passed in via a)
+  ;          current address in bc
+  ;          C-value in hl
+  ld bc,BurstExposureList ;set address of exposure value to the start of the array
+
+  .fillUnderExposedLoop
+    ;before loop, previous C-val is already in HL
+    ld a,e;put number of shifts into a
+    call NextElementGeometric_Sub
+    ;put the result, hl, into [bc] (little-endian) and increment it
+    ld a,l
+    ld [bc], a
+    inc c
+    ld a,h
+    ld [bc], a
+    inc c
+    ;decrement counter and check for complete (0)
+    dec d
+    jr nz,.fillUnderExposedLoop
 
   ret
+
+;@param
+;@clobber a,hl
+;@return hl: C-value to use in the next capture, big-endian (A00x/register order)
+GetAEBExposure::
+  ld a,[BurstShotCurrentCapture] ;a = index within BurstExposureList
+  add a,a ;a = offset within BurstExposureList
+  ld hl, BurstExposureList
+  add a,l
+  ld l,a ;hl = &BurstExposureList[BurstShotCurrentCapture]
+  ld a,[hli]
+  ld h, [hl]
+  ld l,a
+ret
 
   ;---------------------------------Save Data Functions-----------------------------------------------------
   INCLUDE "src/save.asm"
