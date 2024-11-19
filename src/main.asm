@@ -1138,7 +1138,7 @@ checker_payload:
   ; OAM copy 
   ld a,$d4
   ldh [rDMA],a
-  ld a,$10 ;OAM copy waitloop: number of cycles burned = 4*counter- 1
+  ld a,ROM_OAM_DMA_WAITLOOP_COUNT ;OAM copy waitloop: number of cycles burned = 4*counter- 1
   :dec a
   jr nz, :-
   ;Move BGP values into CGB BG palette 0 
@@ -1197,7 +1197,15 @@ checker_payload:
       ld a, [hl]
       ldh [rBCPD], a ;load palette data from table into CGB palette
     ;22c
-  ;total dec88 cycles=$5B; $24*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
+  ;total dec91 cycles=$5B; $24 (waitloop count including the button check)*4=90 cycles - $5B  = $35 cycles within our allowance. Lshift 2x -> new counter is $D
+  ;Lets' recalculate this: Original counter is $28=40 loops. 
+    ;Check = 9 cycles. 
+    ;xor+jp+hramldh = 10 cycles (possibly not taken, the jr path is 7c until a WRAM bank-switch. It's safe to bankswitch during OAM-DMA, so that path is also 10c).
+    ;rBGP copy code is 91 cycles 
+    ;Total 107 or 110 cycles to subtract from 1 + 4*40. 4x must be 160 or higher. If we subtract 107, 4x must be 53 or higher. 4x must be dec14 with 3 wasted cycles, MAY be safe to make it 13 but cutting it close.
+    ;0D works, even for Ram handover
+    ;0C fails, as expected (white screen)
+
   ;check if reset button combination is pressed. Since this doesn't use WRAM, we can check during OAM DMA
   ldh a, [joypad_active] ; 3c
   DEF ROM_RAM_HANDOVER_MASK EQU (JOYPAD_SELECT_MASK | JOYPAD_DOWN_MASK)
@@ -1235,6 +1243,10 @@ checker_payload:
   .end
 checker_payload_end:
   DEF checker_payload_size EQU checker_payload_end-checker_payload
+  ;We use memcpy 8, so make sure it's less than 256 bytes
+  assert checker_payload_size < 256, "checker_payload_size iss more than 255 bytes."
+
+  
 ;----------------------------------------------------------------------------------------------------------
 ;TODO: A hardcoded address may not be valid for all versions.
 ;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
@@ -1253,12 +1265,12 @@ StartHandover::
 
   xor a
   ldh [rLCDC], a ;turn off LCD -- this enables VRAM will always be accessible for the long copy coming up -- otherwise will rst and we'll lose control
-  ;Clear VRAM1 attribute tables 9800-9bff
+  ;Clear VRAM1 attribute tables 9800-9bff and 9c00-9fff
   ld a,$01
   ldh [rVBK],a
   
   ld hl,$9800
-  ld b, $9c
+  ld b, $a0
   :xor a
   ld [hli],a
   ld a,h
@@ -1268,12 +1280,8 @@ StartHandover::
   ;Load checker payload into VRAM1 tiledata $8000-97FF
   ld de, _VRAM ;destination: VRAM1:8000
   ld hl, checker_payload
-  ld b, checker_payload_size
-  :ld a,[hli]
-  ld [de],a
-  inc de
-  dec b
-  jr nz,:-
+  ld c, checker_payload_size
+  call memcpy8_hl_to_de
   ;Switch back to VRAM0
   xor a
   ldh [rVBK],a
@@ -1285,19 +1293,13 @@ StartHandover::
   ;Load HRAM stub
   ld hl, HRAM_stock_stub
   ld de, _HRAM
-  ld b, HRAM_stub_size
-  : ld a,[hli]
-    ld [de], a
-    inc de
-    dec b
-    jr nz,:-
+  ld c, HRAM_stub_size
+  call memcpy8_hl_to_de
   ;load the rest of HRAM with 00s
+  ;we patch out the stock ROM's HRAM clear, so we must do it here 
   xor a
   ld b,$7F-HRAM_stub_size
-  :ld [de],a
-  inc de
-  dec b
-  jr nz,:-
+  call memfill8_a_into_de_sizeb
 
   ;Copy Init code from ROM and NOP out the HRAM clear/OAM copy functions $150-19f -- $50 bytes
   ld hl, $0150
@@ -1317,7 +1319,7 @@ StartHandover::
   dec b
   jr nz,:-
 
-  ;patch out the call to memclr WRAM at +$87,88,89
+  ;patch out the call to memclr WRAM at +$187,88,89 (+$37,38,39)
   ld hl,$D037
   xor a
   ld [hli],a
