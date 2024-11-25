@@ -13,6 +13,8 @@
   \7 label of handler for right press
   \8 label of handler for A press
   \9 initial value (default value is set manually in the default function)
+  TODO: Slashes higher than \9 are not allowed, so later values won't be used.
+  \10 Function to draw the value of the setting to the screen
 
 */
   DEF SETTINGS_X_INDEX = 0
@@ -26,4 +28,5 @@
   X "PRINT ALL", NULL,                          $00,  $00,  $01, NullFunction, NullFunction, Init_PrintAll, $00, NullFunction, 0
   X "SAVE SETTINGS",NULL,                       $00,  $00,  $01, NullFunction, NullFunction, Init_SaveSettings, $00, NullFunction, 0
   X "SAVE CAM OPTIONS",NULL,                    $00,  $00,  $01, NullFunction, NullFunction, Init_SaveCamOpts, $00, NullFunction, 0
+  X "DELETE ALL PHOTOS",NULL,                   $00,  $00, $01, NullFunction, NullFunction, Init_DeleteAll, $00
 PURGE X

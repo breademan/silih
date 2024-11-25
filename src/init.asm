@@ -538,11 +538,7 @@ Init_LCD:
   ;Init save/SRAM stuff
   ;Before calling these functions, you should switch to the correct SRAM bank and enable SRAM writing
   ;Afterwards, disable SRAM writing
-  ld h,$0A 
-  ld [hl],h ;enable SRAM writes
-  ld h, HIGH(rRAMB)
-  ld [hl], $00 ; switch to SRAM bank 0: state vector
-  
+  call StateVector_EnableWrite
   call StateVector_Init
 
   ld h,$00

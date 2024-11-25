@@ -1596,13 +1596,17 @@ ModifyPalette:
   jr nz,:- ;3c
 ret
 
+;Switch to SRAMbank 0 (State Vector, save data, photo slot 0) and enable writing to it.
+;@clobber h
+StateVector_EnableWrite::
+  ld h,$0A 
+  ld [hl],h ;enable SRAM writes
+  ld h, HIGH(rRAMB) ;2c2b
+  ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
+ret
 
 SaveToFreeSlot::
-    ;Switch to SRAMbank 0 and enable writing to it.
-    ld h,$0A 
-    ld [hl],h ;enable SRAM writes
-    ld h, HIGH(rRAMB) ;2c2b
-    ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
+    call StateVector_EnableWrite
     ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
     call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
     and a

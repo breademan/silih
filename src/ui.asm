@@ -1480,6 +1480,35 @@ ret
 Init_SaveCamOpts:
   ;TODO
 ret
+
+;Shortcut to delete all photos -- quicker than handover to ROM
+Init_DeleteAll:
+  ;Capture is not guaranteed to be complete when we enter Settings menustate, so wait for it here.
+  ld h,$50 ;Switch to I/O register bank (write to $4000-5FFF with 4 set)
+  ld [hl],h
+  :ld a, [$A000]  ;Read capture register
+  and a,$01
+  jr nz, :- ;Wait until bit 0 of A000 is 0 (capture unit not running).
+
+
+  ;TODO: right now, the save rambank is just located in WRAM0. We should move it to banked RAM. It'll be called from the UI bank, so some functions may need to be turned to trampoline calls.
+  ;TODO: create some kind of visual cue to let the user know it worked. 
+      ;This should be fine, as no interactions with the save function are especially latency-sensitive
+  ;Switch to save WRAMbank, unlock SRAM writes and switch to SRAM bank 0
+  call StateVector_EnableWrite
+  call StateVector_DeleteAll
+  ld h,$00
+  ld [hl],h ; disable SRAM writes
+
+  ;Update free count
+  ld a,30
+  ld hl,SAVE_SLOTS_FREE
+  ld [hl], a
+  ;Update free count on UI
+  ld de, UIBuffer_Vertical+2
+  call UpdateByteInTilemap
+
+ret
 ;------------Setting Draw Actions-----------------------------------------------
 
 ;Draws the various settings using dedicated functions

@@ -175,16 +175,11 @@ StateVector_CountUsedAndFree:
 
   ;must not clobber b
 StateVector_Backup::
-  ;memcpy from the main State Vector in to the backup
+  ;Copy the main State Vector to the backup State Vector
   ld hl, STATEVECTOR_START_ADDR
   ld de, STATEVECTOR_START_ADDR_ECHO
   ld c, CHECKSUM_MAGIC_END - STATEVECTOR_START_ADDR + 1 ;size including the MAGIC = CHECKSUM_MAGIC_END - STATEVECTOR_START_ADDR + 1
-  :ld a,[hli]
-  ld [de],a
-  inc e ; 8-bit since high bit of address is always B1
-  dec c
-  jr nz,:-
-
+  call memcpy8_hl_to_de
 
   ret
 
@@ -224,3 +219,17 @@ StateVector_FindAndFillFreeSlot::
 
   pop af ;return the bank number in a
   ret
+
+;Create a loop that calls StateVector_WriteByte 30 times with a=FF, increasing hl every time
+;At the end, call StateVector_Backup
+StateVector_DeleteAll::
+  ;Total 14 bytes, but slow
+  ld hl, STATEVECTOR_START_ADDR ;3b 3c
+  ld b, 30 ;2b
+    :ld a, $FF
+    call StateVector_WriteByte ;3b many cycles
+    inc hl ;1b
+    dec b	;1b
+  jr nz,:- ;2b
+  call StateVector_Backup
+ret
