@@ -43,17 +43,17 @@ ClearHRAM:
     jr nz, :-
 
 ; Clears the WRAM area that holds the tilemap data for the options UI.
-ClearOptionLinesBuffer:
+ClearTopbarBuffer:
   ;Can replace with memfill
   ld a,BLANK_TILE_ID
-  ld hl, OptionLinesBuffer
+  ld hl, TopbarBuffer
   ld b,$40-12 ;only the first 20 bytes for each line are used as the buffer. The other 12 bytes in each line are used for variables. Those variables must be initialized AFTER this runs
   ;TODO ignore 12 bytes in the first row, too
   :ld [hli], a
   dec b
   jr nz,:-
 
-;This must not run before ClearOptionLinesBuffer, as it clears any variables in the 2 union regions.
+;This must not run before ClearTopbarBuffer, as it clears any variables in the 2 union regions.
 InitVariables:
   xor a
   ld [RemoteJoypadState],a
@@ -371,8 +371,8 @@ UI_ICONS_ARRANGEMENT_H:
   INCLUDE "src/ui_elements.inc"
 
 BuildSidebar:
-  ;Fill UIBuffer_Vertical with blank tiles (can be replaced with memfill function)
-  ld hl,UIBuffer_Vertical
+  ;Fill SidebarBuffer with blank tiles (can be replaced with memfill function)
+  ld hl,SidebarBuffer
   ld b,$38 ;size of the buffer
   ld a,BLANK_TILE_ID
   :ld [hli],a
@@ -382,7 +382,7 @@ BuildSidebar:
   ;Add the "free" icon (currently F)
   DEF UI_ICONS_OFFSET_FREE EQU $0F
   ld a, UI_ICONS_BASE_ID + UI_ICONS_OFFSET_FREE
-  ld [UIBuffer_Vertical], a
+  ld [SidebarBuffer], a
 
   ;Initialize the variable for drawing the Vertical UI
   ;TODO: move to a dedicated HRAM variables clear function

@@ -32,7 +32,7 @@ MENU_STATE_PREV:: db ;holds the menu to return to from TAKE_CONFIRM and GALLERY 
     ;DEF MENU_POSITION_PREV EQU $FFB2 ;these are both <16 values, we may be able to squeeze PREV and current values into the same memory location 4:4-style
 MENU_NYBBLE_PREV:: db  ;^^^^^    
 VBlank_finished_flag:: db
-Vblank_Sidebar_DrawLine:: db ;contains the line to draw in the vertical UI
+Vblank_Sidebar_DrawLine:: db ; Determines which line of the 14 sidebar lines will be drawn next frame.
 VBlank_AnimationCounter:: db
 SettingsPosition:: db
 SettingsNybble:: db

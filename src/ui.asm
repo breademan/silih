@@ -523,7 +523,7 @@ PrepareSidebar:
 	ld a,52 	;2c2b
 	sub a,c	;1c1b
 	ld b,a ; b = 52-c ;1c1b
-	ld de, UIBuffer_Vertical+4 ;ignore the first line, which holds free image slots
+	ld de, SidebarBuffer+4 ;ignore the first line, which holds free image slots
 	call memcpy8_hl_to_de ;after this, de should be the start of our next region (dest)
 	ld a,BLANK_TILE_ID ;2c2b
 	call memfill8_a_into_de_sizeb ;10c4b call/ret, but memfill may be faster than memcpy, compensating for the decreased cycles
@@ -1505,7 +1505,7 @@ Init_DeleteAll:
   ld hl,SAVE_SLOTS_FREE
   ld [hl], a
   ;Update free count on UI
-  ld de, UIBuffer_Vertical+2
+  ld de, SidebarBuffer+2
   call UpdateByteInTilemap
 
 ret

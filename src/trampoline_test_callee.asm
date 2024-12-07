@@ -6,14 +6,16 @@ Test_Callee_Storage::
 
 
 Trampoline_test_callee::
-    add sp,6 ;Add 6 so we can access the function arguments on the stack
-    pop hl ;hl = arg1
-    pop bc ;bc = arg0
-  
-  
-    add sp,-(6+2+2) ;subtract (6 + 2*POPs) to get back to the top of stack
-  
-    ret
+    ld hl, sp+6 ; Arguments on the stack for a trampoline function are located starting at +6
+    ld a, [hli]
+    ld b, a
+    ld a, [hli]
+    ld c, a
+
+    ld a, [hli]
+    ld l, [hl]
+    ld h, a
+ret
       
 
     ENDL

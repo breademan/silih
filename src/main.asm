@@ -10,12 +10,12 @@ SECTION "WRAM Variables Area 0 SECTION", WRAM0[$CD00]
 WRAM_Var_Area0:
 UNION
 ;64 bytes
-OptionLinesBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are aligned on 256 bytes. Since we can only see the first 20 bytes of each 32-byte line, we can use the last 12 bytes for storage
+TopbarBuffer: DS 64 ;UpdateByteInTileMap assume this line's addresses are aligned on 256 bytes. Since we can only see the first 20 bytes of each 32-byte line, we can use the last 12 bytes for storage
 ;A line buffer size of 64 means two lines of data. We may want to split this into two labels so we can work with the lines separately, but we may also just be able to work with it contiguously.
-;OptionLinesBuffer is HDMA'd, meaning it must be aligned on 16bytes
+;TopbarBuffer is HDMA'd, meaning it must be aligned on 16bytes
 NEXTU
 DS 20
-;Previously had to be placed in UI order for UpdateValsMap_WRAM, but it no longer cares.
+;Previously had to be placed in UI order for UpdateTopbarBuffer, but it no longer cares.
 ;PrepareCameraOpts doesn't care about their in-memory order, so it should be safe to move them around otherwise.
 ;8 bytes
   CamOptN_RAM:: db ;N must be stored immediately before VH for SetNVHtoEdgeMode
@@ -48,16 +48,17 @@ ENDU
   CamOptDither_RAM: ds 48 ; Working copy of the dither table
 .end  
   ;Video mirror register: 1 byte
-  wLCDC:: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing ;Must not be placed in the OptionLinesBuffer region as it is cleared after wLCDC was written.
+  wLCDC:: db ;LCDC can be modified at any time, but there may be bugs with changing window visibility while drawing, so we use this to only update LCDC between frames.
+  ;Must not be placed in the TopbarBuffer region as it is cleared after wLCDC was written.
   
   ;HDMA variables: 7 bytes
-  hdma_current_transfer_length: db
-  hdma_total_transferred: db
-  hdma_total_remaining: db
-  wHDMA1: db
-  wHDMA2: db
-  wHDMA3: db
-  wHDMA4: db
+  hdma_current_transfer_length: db ; Number of 16-byte DMA blocks that the current DMA transfer is set to transfer.
+  hdma_total_transferred: db ; Total number of 16-byte DMA blocks that have been transferred in the 
+  hdma_total_remaining: db  ; Remaining number of 16-byte DMA blocks that have yet to be transferred.  
+  wHDMA1: db  ; Since VBlank interrupts stop and start DMA transfers by writing to HDMAx, we may overwrite them.
+  wHDMA2: db  ; The outside-of-interrupt code to start an HDMA transfer writes to these in addition to rHDMA.
+  wHDMA3: db  ; The code in the Vblank ISR that draws the Topbar restores rHDMA values from these variables after it finishes its GDMA transfers if no transfer was in progress.
+  wHDMA4: db  ; We can't push-pop rDMA1-4 in the ISR because they're write-only. 
   
   ;Save Slot variables: 2 bytes
   SAVE_SLOTS_FREE:: db
@@ -91,10 +92,10 @@ ENDU
   BurstShotCurrentCapture: db
   
   ;16 bytes
-  GENERATED_DITHER_THRESHOLDS: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
+  GeneratedDitherThresholds: ds 16 ;temporary storage space for dither threshold values from GenerateThresholdsFromRange. Used 3 times per dither pattern construction. Must not cross address byte boundary
   .end
   ;56 bytes
-  UIBuffer_Vertical:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
+  SidebarBuffer:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
   BurstExposureList: ds $1E ; Stored little-endian, same as CamOptC_RAM, opposite of CamOptA00x
                             ; to hold $0F C-values, we need $0F * 2 bytes
   ;Cumulative $F4 bytes
@@ -128,7 +129,7 @@ MainLoop:
 
 HandleInputDone::
 
-call UpdateValsMap_WRAM
+call UpdateTopbarBuffer
 
 ;Checks (ideally, these work somewhat like interrupts)
 ViewfinderChecks:
@@ -226,7 +227,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ld a,[wLCDC] ;+4c3b
   ldh [rLCDC],a ;+3c2b
 
-  call DrawValueLines_DMAMethod 
+  call DrawTopbar_DMAMethod  ;TODO inline this
   call DrawSidebar ;TODO inline this
   call ModifyPalette
 
@@ -341,9 +342,9 @@ CapturingHandler:
   xor a
   ld [rRAMB], a
   ;Set up the hdma variables
-  ld [hdma_total_transferred],a ; total transferred bytes so far is 0
+  ld [hdma_total_transferred],a ; total transferred 16-byte DMA transfer blocks is 0
   ld a,$E0
-  ld [hdma_total_remaining],a ;remaining bytes so far: all of them!
+  ld [hdma_total_remaining],a ;remaining DMA blocks so far: all of them!
   ld a,$80
   ld [hdma_current_transfer_length], a ;Transfer length is the maximum allowable by DMA
 
@@ -495,7 +496,11 @@ PauseHandler:
 ;Functions
 ;------------------------------------------------------------------------------
 
-;Before calling, make sure to update shadow camopt registers with PrepareCameraOpts
+/**
+* Updates the real CAM registers and signals the capture hardware to begin a capture. 
+* Before calling, make sure to update shadow camopt registers with PrepareCameraOpts.
+* @clobber a,hl,de
+*/
 StartCapture:
     ld a, $10
     ld [rRAMB], a ; switch to GB Camera register
@@ -505,12 +510,14 @@ StartCapture:
     ret 
 
 
-;Function to load 1bpp tiles into VRAM (skipping every other dest byte)
-;Assumes VRAM accessible and size of < FF bytes.
-;src hl
-;dest de
-;size b (in source bytes), minus one (this is so that we can transfer $100 bytes and a size of 0 is unused)
-;If src is <$FF bytes and L starts at 0, we can speed this up using inc r8 and possibly changing the counter check condition
+/**
+* Loads 1bpp tiles into VRAM (skipping every other dest byte)
+* Assumes VRAM accessible and size of <=$100 bytes.
+* @param hl: source
+* @param de: destination
+* @param b: size (in source bytes), minus one (this is so that we can transfer $100 bytes and a size of 0 is unused)
+* @clobber a, b, de, hl
+*/
 memcpy_1bpp:
   inc b
   .loop
@@ -523,16 +530,11 @@ memcpy_1bpp:
     jp nz, memcpy_1bpp.loop
   ret
 
-;Converts the various camera opt WRAM variables into 5 register variables that can be applied to A001-A005 upon recapture.
-;THESE should probably be WRAM vars, but ld a,[hli] (2c*5 + 3c ld r16,n16) is probably faster than ldh a, [n16] (3c2b). 
-;Even with HRAM ld c,n8, ldh a, [c] (2c1b), inc c (1c1b), total HRam load time would be (1c + 2c*5 + 1*5), slower than the wram version, and perhaps taking more space.
-
-;If we store the CAMOPT_A00x_RAM inside the function itself, we can save space and a small amount of ld time, but we can't make the values contiguous
-;But we will have to worry about making sure this function is accessible when the variables are used in the capture handler
-;Relocating the CAMOPT WRAM variables to UpdateCameraOpts has the same problem: we need it accessible to both the capture handler and PrepareCameraOpts
-
-;Should be run right after updating WRAM varibles -- we get increased latency if we run this before each capture.
-
+/**
+* Converts the individual CamOpt_xx_RAM variables into 5 shadow CAM register variables that can be applied to A001-A005 using UpdateCameraOpts.
+* Should be run right after updating CamOpt_xx_RAM varibles -- we get increased latency if we run this before each capture.
+* @clobber a, d
+*/
 PrepareCameraOpts::
   ; We will use register d as our work register since the input function may use b to store the input
   ; And if we put things in HRAM, we might use C to address them instead of n8.
@@ -574,12 +576,12 @@ PrepareCameraOpts::
   ld [CamOptA005_RAM], a
 ret
 
-;Assumes we've already switched to the Camera Opts register and loaded A00x variables using PrepareCameraOpts
-;Since this is only used for right before we restart a capture and in init, it should probably be a macro or subroutine to avoid a call; it's also pretty short
+/**
+* Writes from the shadow CAM registers to the real CAM registers in SRAM$10:A0xx
+* Assumes we've already switched to the Camera Opts register and loaded A00x variables using PrepareCameraOpts
+* @clobber a, hl, de
+*/
 UpdateCameraOpts::
-
-  ; ld hl, CamOptA005_RAM
-  ; ld de, $A005
   ld hl, (CamOptDither_RAM.end-1) ;+3
   ld de, $A035 ;+3
   :ld a, [hld] ;+2 : 8 cycles/byte
@@ -588,33 +590,40 @@ UpdateCameraOpts::
   jr nz, :- ;+3
 ret
 
-;Updates the working tilemap buffer of camera+other options based off the underlying values
-UpdateValsMap_WRAM:
+/**
+* Updates the working tilemap buffer Option based off the underlying values
+* @clobber a, de, hl
+*/
+UpdateTopbarBuffer:
   ;Write the values to the WRAM buffer
 
-  call UpdateOptionBuffer_EdgeMode
+  call UpdateTopbarBuffer_EdgeMode
 
-  call UpdateOptionBuffer_CamOptC
+  call UpdateTopbarBuffer_CamOptC
   
-  call UpdateOptionBuffer_CamOptO
+  call UpdateTopbarBuffer_CamOptO
 
-  call UpdateOptionBuffer_CamOptG
+  call UpdateTopbarBuffer_CamOptG
 
-  call UpdateOptionBuffer_CamOptE
+  call UpdateTopbarBuffer_CamOptE
 
-  call UpdateOptionBuffer_CamOptV
+  call UpdateTopbarBuffer_CamOptV
 
-  call UpdateOptionBuffer_CamOptContrast
+  call UpdateTopbarBuffer_CamOptContrast
 
-  call UpdateOptionBuffer_DitherTable
+  call UpdateTopbarBuffer_DitherTable
 
-  ret
+ret
 
-
-;hl: location of byte to put into tilemap
-;de location in tilemap to load the data
-;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
-;assumes de doesn't cross a byte address boundary
+/**
+* Puts the value of a byte at hl into the tilemap at de
+* Changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped.
+* (assumes de doesn't cross a byte address boundary)
+* @param hl: location of byte to put into tilemap
+* @param de location in tilemap to load the data
+* @return de: least-significant nybble of byte in tilemap (de-1 if flipped, else de+1),
+* @return hl: hl+1
+*/
 UpdateByteInTilemap::
   ;17 cycles + call/ret
   ld a, [hl] ;display high nybble +2c1b
@@ -629,10 +638,15 @@ UpdateByteInTilemap::
   ld [de],a ;+2c1b
   ret ;+4c1b -- function call/ret is 10c/4b total
 
-;hl: location of byte to put into tilemap
-;de location in tilemap to load the data
-;changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped, de will end up in the location of the least-significant nybble (dec if flipped, else inc), hl incremented
-;assumes de doesn't cross a byte address boundary
+/**
+* Puts the value of a byte at hl into the tilemap at de
+* Changes [de] and [de-1] if flipped. [de] and [de+1] if not flipped.
+* (assumes de doesn't cross a byte address boundary)
+* @param hl: location of byte to put into tilemap
+* @param de location in tilemap to load the data
+* @return de: least-significant nybble of byte in tilemap (de-1 if flipped, else de+1),
+* @return hl: hl+1
+*/
 UpdateByteInTilemap_flipped::
   ;17 cycles + call/ret
   ld a, [hl] ;display high nybble +2c1b
@@ -647,11 +661,12 @@ UpdateByteInTilemap_flipped::
   ld [de],a ;+2c1b
   ret ;+4c1b -- function call/ret is 10c/4b total
 
-
-; Stop the current HDMA transfer, if there is one, and draw a UI line using GDMA
-;DrawValueLines will not write to VRAM; instead it will write to the WRAM space and no longer switch/switchback VRAM banks
-
-DrawValueLines_DMAMethod:
+/**
+* Draws the topbar using 2 GDMA transfers.
+* Stops and restarts the current HDMA transfer, if there is one.
+* @clobber a, b, de, hl
+*/
+DrawTopbar_DMAMethod:
   ;Save current VRAM bank: 17 cycles across start and end
   ldh a,[rVBK] ;+3c2b
   push af ;+4c1b
@@ -703,8 +718,7 @@ DrawValueLines_DMAMethod:
   ;restore HDMA registers (if we were in the middle of populating them to start a new HDMA transfer outside of the ISR). wHDMA regs must be contiguous.
   ld hl,wHDMA1 ;+3c3b
   ld a,[hli] ;+2c1b
-  ldh [rHDMA1],a ;+3c2b    :cp a,$5F ;this is an infinite loop since the high nybble from a is removed.
-
+  ldh [rHDMA1],a ;+3c2b
   ld a,[hli] ;+2c1b
   ldh [rHDMA2],a ;+3c2b
   ld a,[hli] ;+2c1b
@@ -717,11 +731,14 @@ DrawValueLines_DMAMethod:
   ldh [rVBK],a ;+3c2b
   ret 
 
-
+/**
+* Initiates a 32-byte GDMA transfer from the first line of TopbarBuffer to the topbar in the actual tilemap.
+* @clobber a
+*/
 StartGDMATransfer_Line1:
-  ld a, HIGH(OptionLinesBuffer) ;+2c2b
+  ld a, HIGH(TopbarBuffer) ;+2c2b
   ldh [rHDMA1], a ;+3c2b
-  ld a, LOW(OptionLinesBuffer) ;+2c2b
+  ld a, LOW(TopbarBuffer) ;+2c2b
   ldh [rHDMA2], a ;+3c2b
   ld a, HIGH(TILEMAP_UI_ORIGIN_H+$20) ;+2c2b
   ldh [rHDMA3],a ;+3c2b
@@ -732,10 +749,14 @@ StartGDMATransfer_Line1:
   ;+8*2 = 16 cycles for the DMA
 ret
 
+/**
+* Initiates a 32-byte GDMA transfer from the second line of TopbarBuffer to the topbar in the actual tilemap.
+* @clobber a
+*/
 StartGDMATransfer_Line2:
-  ld a, HIGH(OptionLinesBuffer+$20) ;+2c2b
+  ld a, HIGH(TopbarBuffer+$20) ;+2c2b
   ldh [rHDMA1], a ;+3c2b
-  ld a, LOW(OptionLinesBuffer+$20) ;+2c2b
+  ld a, LOW(TopbarBuffer+$20) ;+2c2b
   ldh [rHDMA2], a ;+3c2b
   ld a, HIGH(TILEMAP_UI_ORIGIN_H+$60) ;+2c2b
   ldh [rHDMA3],a ;+3c2b
@@ -746,7 +767,10 @@ StartGDMATransfer_Line2:
   ;+8*2 = 16 cycles for the DMA
 ret
 
-
+/**
+* Restarts the HDMA transfer that transfers captured images to VRAM.
+* @clobber a, hl, de
+*/
 RestartHDMATransfer:
   ; Calculate addend as to_dma16addr(hdma_total_transferred) and put it in de
 	ld a,[hdma_total_transferred] ;+4c3b
@@ -788,16 +812,21 @@ RestartHDMATransfer:
 	dec a ;+1c1b ;Next transfer length is stored as the actual length in blocks of 16, but HDMA5 takes length-1
 	set 7,a ;+2c2b ;Bit 7 set – HBlank DMA
 	ldh [rHDMA5],a ;+3c2b
-  ret
+ret
 
-;Largely based on the GBDK's banked calling convention (https://gbdk-2020.github.io/gbdk-2020/docs/api/docs_coding_guidelines.html)
-;arg e: WRAM bank to switch to
-;arg hl: address of callee
-;clobbers a,bc, and whatever the function it calls clobbers.
-;pushes the current WRAM bank to stack (as AF), switches to the callee's WRAM bank, and jumps to the function in hl.
- 
-  ;The callee must add sp,-(6+(2*num_POPs)) in order to return to the top of the stack.
-  ;after it RETs and the trampoline switches back to the caller WRAM bank, the caller must also add 2*num_POPs to the stack to clean up.
+/**
+* Calls trampoline functions, functions that can be called from other WRAM banks and are themselves located in banked WRAM.
+* Largely based on the GBDK's banked calling convention (https://gbdk-2020.github.io/gbdk-2020/docs/api/docs_coding_guidelines.html)
+* Caller passes arguments to callee by pushing to the stack.
+* Pushes the current WRAM bank to stack (as AF), switches to the callee's WRAM bank, and jumps to the function in hl.
+* To access arguments on the stack, the callee should ld hl, sp+6 (2 bytes for each of caller address, caller WRAM bank, and trampoline return address)
+* Then move down the stack by loading and incrementing hl
+* After return, the caller must pop the argument off the stack (by using add sp,2*number of pushes)
+* Callee adds 6 to sp to reach pre-trampoline top of stack and access arguments.
+* @param e: WRAM bank to switch to
+* @param hl: address of callee
+* @clobber a,bc, and whatever the function it calls clobbers.
+*/
 Trampoline_hl_e::
   ldh a,[rSVBK]
   push af ;push current bank
@@ -814,18 +843,16 @@ Trampoline_hl_e::
 NullFunction::
   ret
 
-
-    ;arg bc: b is min/start, c is max
-    ; stores the thresholds in a $10-byte static region, GENERATED_DITHER_THRESHOLDS -- this uses all our regs and we'd have no counter, so we'd have to use 16 duplicate add16s+ldn16s to fill. 
-    ;instead, we could push the 16 values to the stack by first PUSHing de, then incrementing it to erase the value of e. At the end, increment sp by 16 and return.
-    ;All these sp instructions seem quite complex -- we might
-    ;sp is now at the (start of backward threshold table + 3), so we ld hl, sp-3 to get the table's minimum value. When stored this way, the matrix is addressed negatively,
-    ;e.g val2 is at [baseaddr-2].
-    ;clobbers all regs
+/**
+* Fills GeneratedDitherThresholds with 16 linearly-interpolated bytes between min and max.
+* GeneratedDitherThresholds is read by ArrangeThresholdsInPattern 3 times to put into CamOptDither_RAM
+* @param b: min
+* @param c: max 
+* @clobber a,bc,de,hl
+*/
 GenerateThresholdsFromRange:
   ;bc: step size (calculated from arg bc) in 8.8 fixed-point
   ;de: running 8.8 fixed-point that holds start + i*step
-
 
   macro ADD16_BC_INTO_DE ;6c6b
     ld a, e ;1c1b
@@ -845,10 +872,13 @@ GenerateThresholdsFromRange:
   endm
 
   ;3c3b
-  ld d, b ;load start of range into our 8.8 running sum
+  ;load start of range (min) into our 8.8 running sum (de)
+  ld d, b
   ld e, $00 ; fractional part initialized to 0
 
-  ;12c
+  ; 12c
+  ; Calculate 8.8 fixed-point step size bc
+  ; Step size is (max-min)>>4 such that we can generate 16 linearly-interpolated values from one min and one max value)
   ld a, c ;+1
   sub a, b ;a = max - min ;+1
   swap a ;+2
@@ -859,31 +889,30 @@ GenerateThresholdsFromRange:
   and a, $0F ;+2
   ld b, a ;stepsize_H = swap(max-min)[3:0] ;+1
 
-  ld hl, GENERATED_DITHER_THRESHOLDS ; 3c
+  ld hl, GeneratedDitherThresholds ; 3c
 
   .loop
   ld a, d ;+1
-  ld [hli],a ;load whole-part of running sum into GENERATED_DITHER_THRESHOLDS[i] ;+2 
+  ld [hli],a ;load whole-part of running sum into GeneratedDitherThresholds[i] ;+2 
   ADD16_BC_INTO_DE_SATURATING ;generate next value ;+10
-  ld a, LOW(GENERATED_DITHER_THRESHOLDS.end) ;+2
-  cp a, l ;if the next address to write to is out-of-bounds, finish. We use a check for equality because even if GENERATED_DITHER_THRESHOLDS crosses a byte boundary,
+  ld a, LOW(GeneratedDitherThresholds.end) ;+2
+  cp a, l ;if the next address to write to is out-of-bounds, finish. We use a check for equality because even if GeneratedDitherThresholds crosses a byte boundary,
   ;the l value will never loop ;+1
   jr nz, .loop ;+3
+ret ;+2
 
-  dec hl   ;leaves hl at GENERATED_DITHER_THRESHOLDS.end-1 (last element) +2
-
-  ret ;+2
-
-  ;Called after calling GenerateThresholdsFromRange and setting a=0,1,2. puts the values in GENERATED_DITHER_THRESHOLDS every 3 spaces in the working dithering table, according to the ordering matrix
-  ;arg a = offset within the working dithering table (0, 1, or 2), which represents which group of threshold (dark, middle, or light) values are being arranged.
-  ;arg hl = address of last element of dither thresholds generated by GenerateThresholdsFromRange
-    ;Though it's always the same address, this is always called after a call to the former, so it's more efficient to not reload it
+/** 
+* Fills CamOptDither_RAM (either the dark, medium, or light third) with values from GeneratedDitherThresholds in the order dictated by OrderTableRelative.
+* Called after calling GenerateThresholdsFromRange and setting a=0,1,2. puts the values in GeneratedDitherThresholds every 3 spaces in the working dithering table, according to the ordering matrix
+* CamOptDither_RAM format is (comparison) [[Dark,Mid,Light], [Dark,Mid,Light] ...]
+* @param a = offset within the working dithering table (0, 1, or 2), which represents which group of threshold (dark, middle, or light) values are being arranged.
+*/
 ArrangeThresholdsInPattern:
-  ;bc = source - last element of dither thresholds generated by GenerateThresholdsFromRange
-  ;de = dest - working dither pattern
-  ;hl = order table
-  ld b, h ;using hl for the order tables loses us a byte for this reg switch, but saves 32 cycles due to hli
-  ld c, l
+  ;bc = source: Dither thresholds generated by GenerateThresholdsFromRange: starting at last element of GeneratedDitherThresholds, accessed randomly in an order dictated by OrderTableRelative
+  ;de = dest: working dither pattern, written to sequentially in steps of 3
+  ;hl = address in order table. The order table is how many to add/subtract from bc to get the address of the next dither threshold. Access sequentially, so in hl.
+
+  ld bc,GeneratedDitherThresholds.end-1
 
   ld de, CamOptDither_RAM
     ;moving hl to bc loses us 2 cycles and 2 bytes, but instead of using ld a, [bc] 2c1b + inc bc 2c1b, we can just use ld a, [hli] 2c1b, 
@@ -911,9 +940,9 @@ ArrangeThresholdsInPattern:
 
   ret
 
-;fill dither table
-;reads the contrast + light/dark variable to select the dither pattern, then fills the table
-;args: null
+/**
+* Fill effective dither table CamOptDither_RAM with values according to the selected dither table and contrast.
+*/
 PrepareDitherPattern::
   ;add the dither table number to DITHER_BASE_TABLE (the table start addresses are all in the same byte, though the last table actually goes outside)
   ld hl, DITHER_BASE_TABLE ;+3
@@ -947,7 +976,7 @@ PrepareDitherPattern::
   push hl ;push address of start of second range ;+4
   call GenerateThresholdsFromRange
   ld a, $01 ;+2
-  call ArrangeThresholdsInPattern ; arrange our thresholds into the DARK part of the pattern
+  call ArrangeThresholdsInPattern ; arrange our thresholds into the MID part of the pattern
   pop hl ;+3
 
   ld a, [hli]
@@ -956,106 +985,126 @@ PrepareDitherPattern::
   push hl ;push address of start of third range
   call GenerateThresholdsFromRange
   ld a, $02
-  call ArrangeThresholdsInPattern ; arrange our thresholds into the DARK part of the pattern
+  call ArrangeThresholdsInPattern ; arrange our thresholds into the LIGHT part of the pattern
   pop hl
-  
-
-  ret
+ret
 
 
-;-------------------------------------------------------------------------------------------------------------------------
-;These functions set OptionLinesBuffer to tiles corresponding to the underlying values
-
+/*-------------------------------------------------------------------------------------------------------------------------
+* UpdateTopbarBuffer_xx Functions
+* These functions set TopbarBuffer to tiles corresponding to the underlying values */
 DEF DEFINE_NULL_X EQUS "MACRO X\n \n ENDM\n"
 
-;Sets VALSMAP_OFFSET to (the offset of the left tile of) the area it should be drawn in OptionLinesBuffer
+;Sets TOPBAR_OFFSET to (the offset of the left tile of) the variable's corresponding 4-tile area in TopbarBuffer
 MACRO GET_UI_OFFSET
-  DEF VALSMAP_OFFSET = 0
+  DEF TOPBAR_OFFSET = 0
   DEF XMACRO_SEARCH_TERM EQUS \1
   ;This macro only works if the numerical values underlying the labels are unique. -- otherwise we'd need to compare the names of the labels instead of their values.
-  DEF GETINDEX_X_DEF EQUS "MACRO X\nIF \\1=={XMACRO_SEARCH_TERM}\n PURGE X\n \{DEFINE_NULL_X\}\n         ELSE\n DEF VALSMAP_OFFSET+=1  \nENDC\n  ENDM\n"
+  DEF GETINDEX_X_DEF EQUS "MACRO X\nIF \\1=={XMACRO_SEARCH_TERM}\n PURGE X\n \{DEFINE_NULL_X\}\n         ELSE\n DEF TOPBAR_OFFSET+=1  \nENDC\n  ENDM\n"
   ;X counts every element that is not the search term, then redefines itself to be a null macro after
   GETINDEX_X_DEF
   INCLUDE "src/ui_elements.inc"
   PURGE XMACRO_SEARCH_TERM
   PURGE GETINDEX_X_DEF
   ;We will need to use X macros to set the offset to left side of the variable drawing space: 4*index.
-  DEF VALSMAP_OFFSET *=4
-  IF VALSMAP_OFFSET >= 20 ;If value is out of viewable area, wrap around to second line
-  DEF VALSMAP_OFFSET+=12
+  DEF TOPBAR_OFFSET *=4
+  IF TOPBAR_OFFSET >= 20 ;If value is out of viewable area, wrap around to second line
+  DEF TOPBAR_OFFSET+=12
   ENDC
 ENDM
 
-;@param: none
-;@clobber: a, de
-UpdateOptionBuffer_EdgeMode:
+/**
+* Populate EdgeMode's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de
+*/
+UpdateTopbarBuffer_EdgeMode:
   GET_UI_OFFSET "CamOptEdgeMode"
 
   IF SCREEN_FLIP_H==1 ;With horizontal rotation, this is the leftmost (just under the text)
-    ld de, OptionLinesBuffer+VALSMAP_OFFSET ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
+    ld de, TopbarBuffer+TOPBAR_OFFSET ;+3c3b ;Note: when adding to e, first line will not overflow, but starting at the second line of values ($9A20), it will. So between them, inc d
   ELSE ;With no rotation, this is the rightmost nybble
-    ld de, OptionLinesBuffer+VALSMAP_OFFSET+3 ;+3c3b
+    ld de, TopbarBuffer+TOPBAR_OFFSET+3 ;+3c3b
   ENDC
   ld a,[CamOptEdgeMode] ;+2c1b ;put the value of the selected option in a 
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b ;load nybble value into tilemap
   ret
 
-UpdateOptionBuffer_CamOptE:
+/**
+* Populate CamOptE's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de
+*/
+UpdateTopbarBuffer_CamOptE:
   GET_UI_OFFSET "CamOptE_RAM"
   IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+  ld de, TopbarBuffer+TOPBAR_OFFSET
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ld de, TopbarBuffer+TOPBAR_OFFSET+3
   ENDC
   ld a, [CamOptE_RAM] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
   ret
 
-UpdateOptionBuffer_CamOptContrast:
+/**
+* Populate CamOptContrast's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de
+*/
+UpdateTopbarBuffer_CamOptContrast:
   GET_UI_OFFSET "CamOptContrast"
   IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+  ld de, TopbarBuffer+TOPBAR_OFFSET
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ld de, TopbarBuffer+TOPBAR_OFFSET+3
   ENDC
   ld a, [CamOptContrast] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
   ret
 
-UpdateOptionBuffer_DitherTable:
+/**
+* Populate DitherTable's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de
+*/
+UpdateTopbarBuffer_DitherTable:
   GET_UI_OFFSET "CamOptDitherTable"
   IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+  ld de, TopbarBuffer+TOPBAR_OFFSET
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ld de, TopbarBuffer+TOPBAR_OFFSET+3
   ENDC
   ld a, [CamOptDitherTable] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
   ret
 
-UpdateOptionBuffer_CamOptV:
+/**
+* Populate CamOptV's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de
+*/
+UpdateTopbarBuffer_CamOptV:
   GET_UI_OFFSET "CamOptV_RAM"
   IF SCREEN_FLIP_H==1
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+  ld de, TopbarBuffer+TOPBAR_OFFSET
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+3
+  ld de, TopbarBuffer+TOPBAR_OFFSET+3
   ENDC
   ld a, [CamOptV_RAM] ;+4c3b
   or a,UI_ICONS_BASE_ID
   ld [de], a ;+2c1b
   ret
 
-UpdateOptionBuffer_CamOptC: 
+/**
+* Populate CamOptC's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de, hl
+*/
+UpdateTopbarBuffer_CamOptC: 
   GET_UI_OFFSET "CamOptC_RAM"
    ;C; 4 nybbles from 2 bytes
   IF SCREEN_FLIP_H==1
     ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
     ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
-    ld de, OptionLinesBuffer+VALSMAP_OFFSET+1 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
+    ld de, TopbarBuffer+TOPBAR_OFFSET+1 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
     call UpdateByteInTilemap_flipped ;3b
     inc e ;display LSB:H
     inc e 
@@ -1064,7 +1113,7 @@ UpdateOptionBuffer_CamOptC:
   ELSE
   ld hl, CamOptC_RAM ;loads LOW byte's addr into hl
   ;When Hflipped, we display the least significant bytes and nybbles first -- set de to rightmost tilemap position, then dec it while incrementing hl, our source
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
+  ld de, TopbarBuffer+TOPBAR_OFFSET+2 ;+2c2b ; go to leftmost tile of left byte (LSB's LSN)+1
   call UpdateByteInTilemap ;3b
   dec e ;display LSB:H
   dec e
@@ -1073,34 +1122,44 @@ UpdateOptionBuffer_CamOptC:
   ENDC
   ret
 
-
-UpdateOptionBuffer_CamOptO: 
+/**
+* Populate CamOptO's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de, hl
+*/
+UpdateTopbarBuffer_CamOptO: 
   GET_UI_OFFSET "CamOptO_RAM"
-  DEF VALSMAP_OFFSET +=1 ;O; 2 nybbles
+  DEF TOPBAR_OFFSET +=1 ;O; 2 nybbles
   ld hl, CamOptO_RAM
   IF SCREEN_FLIP_H==1 
   ;if screen flipped, de is second-to-right and we want to move it to the one-after-leftmost
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET
+  ld de, TopbarBuffer+TOPBAR_OFFSET
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
+  ld de, TopbarBuffer+TOPBAR_OFFSET+1
   ENDC
   call {UpdateByteInTilemap_rotation}
   ret
 
-
-UpdateOptionBuffer_CamOptG:
+/**
+* Populate CamOptG's region in TopbarBuffer with tiles corresponding to its value
+* @clobber a, de, hl
+*/
+UpdateTopbarBuffer_CamOptG:
   GET_UI_OFFSET "CamOptG_RAM"
   ;G; 2 nybbles
   ld hl,CamOptG_RAM
   IF SCREEN_FLIP_H==1 
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+1
+  ld de, TopbarBuffer+TOPBAR_OFFSET+1
   ELSE
-  ld de, OptionLinesBuffer+VALSMAP_OFFSET+2
+  ld de, TopbarBuffer+TOPBAR_OFFSET+2
   ENDC  
   call {UpdateByteInTilemap_rotation}
   ret
 
 ;--------------------------------Handover Payloads---------------------------------------------------------
+/**
+* In the stock ROM, switches to VRAM1, jumps to HandoverChecker, then switches back to VRAM0.
+* Is placed in HRAM instead of the OAM DMA function.
+*/
 HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's HRAM instead of the normal OAM DMA function.
   .start
   ;switch bank to VRAM1
@@ -1118,8 +1177,10 @@ HRAM_stock_stub: ;10 bytes -- this is the function that will go in stock ROM's H
   DEF HRAM_stub_size EQU HRAM_stock_stub.end - HRAM_stock_stub.start
   assert HRAM_stub_size <= 10, "HRAM_stock_stub must fit within 10 bytes"
 
-  ;decimal 13 bytes -- goes at the end of the copied init sequence in VRAM1 or SRAM
-  ;calls memclr on WRAM (except stack) and completes handover to later part of ROM init sequence
+/** 
+* Calls ROM's memclr on WRAM, except for some stack, with a return address to later part of the initialization sequence which doesn't overwrite HRAM, completing handover.
+* After the ROM's initialization sequence is loaded into writable memory and patched, this routine is appended to the end.
+*/
 CompleteHandover_storage:
   .start
   ld hl, $C000 ;3b
@@ -1129,9 +1190,14 @@ CompleteHandover_storage:
   ld de,HANDOVER_ADDR ;3b ;push return address: point in the ROM where we return control
   push de ;1b
   jp ROM_MEMCLR_ADDR ;3b
-  .end
-  DEF CompleteHandover_SIZE EQU CompleteHandover_storage.end - CompleteHandover_storage.start
+.end
+  DEF CompleteHandover_SIZE EQU CompleteHandover_storage.end - CompleteHandover_storage.start ;13 bytes
 
+/**
+* Initiates an OAM DMA, moves palette in BGP into CGB palette 0, checks whether the key combination is pressed to hand back over to RAM code,
+* and the waits until OAM DMA is nearly complete so the HRAM_stock_stub can safely return.
+* When the stock ROM is running, HRAM_stock_stub jumps here.
+*/
 checker_payload:
   DEF HandoverChecker EQU _VRAM
   .start
@@ -1248,6 +1314,12 @@ checker_payload_end:
 
   
 ;----------------------------------------------------------------------------------------------------------
+/**
+* Starts the handover process.
+* Loads checker data into VRAM1, WRAM switches to STOCK_RAMBANK, loads the HRAM stub, 
+* loads and patches ROM init code into banked WRAM, appends CompleteHandover, and jumps to the patched initialization code.
+* Called from the UI handler.
+*/
 ;TODO: A hardcoded address may not be valid for all versions.
 ;memclr address should be stored after the 4th $cd (CALL) instruction. In my version, there are no $cd bytes aside from calls between $150 and there   
 DEF ROM_MEMCLR_ADDR EQU $043f
@@ -1328,10 +1400,12 @@ StartHandover::
 
   jp $D000 ;run copy of init code with patches
 
-;Called by the Vblank ISR. Draws one of the 14 lines in the vertical UI
-
+/**
+* Draws one of the 14 lines in the sidebar buffer to the sidebar in VRAM.
+* Called by the Vblank ISR. 
+*/
 DrawSidebar:
-  ld hl, UIBuffer_Vertical ;+3
+  ld hl, SidebarBuffer ;+3
   ;calculate src address
   ldh a,[Vblank_Sidebar_DrawLine] ;+3
   inc a ;+1
@@ -1346,7 +1420,7 @@ DrawSidebar:
   ld b, $00 ;+2
   ld c, a ;offset bc = DrawLine * 4 ;+1
   add hl,bc ;+2
-  ld d,h ;de = start of 4 source addresses: UIBuffer_Vertical + (rownum*4) ;+1
+  ld d,h ;de = start of 4 source addresses: SidebarBuffer + (rownum*4) ;+1
   ld e,l ;+1
 
   ;Calculate destination address
@@ -1397,11 +1471,13 @@ DrawSidebar:
   ENDC
 ret
 
-;@param c = size in bytes
-;@param de = dest
-;@param hl = source
-;Copies data from src to dest.
-;10 cycles / byte
+/**
+* Copies up to 255 bytes from source to destination.
+* 10 cycles / byte
+* @param hl = source
+* @param de = dest
+* @param c = size in bytes
+*/
 memcpy8_hl_to_de::
   :ld a,[hli] ;2c 1b
   ld [de],a ;2c 1b
@@ -1409,10 +1485,13 @@ memcpy8_hl_to_de::
   dec c ;1c 1b
   jr nz,:- ;3c 2b
 ret
-;@param b = size in bytes
-;@param de = dest
-;@param a = value with which to fill
-;Fills b bytes of de with a
+
+/**
+* Fills b bytes of [de] with a
+* @param b = size in bytes
+* @param de = dest
+* @param a = value with which to fill
+*/
 memfill8_a_into_de_sizeb::
   :ld [de],a
   inc de
@@ -1421,16 +1500,19 @@ memfill8_a_into_de_sizeb::
 ret
 
 
-;@param  c = size in bytes
-;@param hl = pointer to str1
-;@param de = pointer to str2
-;Compares the (possibly non-null-terminated) strings in hl and de. Returns 0 in a if the strings are equal, -1 otherwise.
-;@clobber a,hl,de,c
+/**
+* Compares c bytes of hl and de.
+* @param  c = size in bytes
+* @param hl = pointer to str1
+* @param de = pointer to str2
+* @clobber a,hl,de,c
+* @return　a: 0 if the strings are equal, -1 otherwise.
+*/
 memcmp::
   .loop: 
   ld a,[de]
   inc de
-  cp a,[hl] ;check if vlaues are equal
+  cp a,[hl] ; check if values are equal
   inc hl ; doesn't affect flags
   jr z,:+
     ld a,-1 ;If the values are different, return -1
@@ -1441,27 +1523,22 @@ memcmp::
   ld a,0 ;if we've reached end of buffer with all bytes equal, return 0
 ret
 
-;Subroutine jumped to early in the init process -- since it's launching an alternate payload, it does not return.
+/**
+* Sets the registers as if not-CGB and jumps back to the launcher ROM, which launches the alternate payload.
+*/
 LaunchAlternativePayload::
-;Switch to the bank containing the alternate payload.
-;Since we aim for DMG support here, we need to be able to do this without bankswitching.
-;Presumably this means that we should store the alternative payload in the last bank that the launcher copies.
-;Alternatively, we could check at the start of launcher for DMG mode, but that means we would have two separate launch systems for the alternate payload: here (for GBC) and in the launcher (for DMG) 
-;in the launcher for DMG ROM
+;The launcher checks at the start for DMG mode.
+  xor a ;set flags as if DMG/MGB/SGB -- DMG/SGB is 01, MGB/SGB2 is $FF, but as long as it's not $11 we're not CGB.
+  jp $100 ; jp back to launcher ROM
 
-;A simpler solution is to set the flags as if it were a DMG, jump back to the launcher ROM, and let the launcher rom do the alternate payload.
-;+We won't need to make the entire launcher DMG-compatable
-;- The alternative payload will run from either CGB-mode or DMG mode, depending on what it's launched from.
-
-xor a ;set flags as if DMG/MGB/SGB -- DMG/SGB is 01, MGB/SGB2 is $FF, but as long as it's not $11 we're not CGB.
-jp $100 ; jp back to launcher ROM
-
-
+/**
+* Gets input and puts it into joypad_active
+* If Setting_SerialRemote is set, also initiates a serial transfer and updates joypad_active from serial controller.
+*/
 GetSerialInput:
-CheckSerial:
-  ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip
+  ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip serial transfer
   and a
-  ld b,a
+  ld d,a ;Store Setting_SerialRemote in d. ROM's getInput doesn't clobber c,d,e
   jr z,GetInputPtr
   .startTransfer
   ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
@@ -1469,7 +1546,7 @@ CheckSerial:
   ;Input format is D U L R: START SEL A B
   GetInputPtr: call $0000
 
-  ld a,b   ; If serial remote is disabled, skip
+  ld a,d   ; If serial remote is disabled, skip
   and a
   ret z
   ;Here, the transfer should be finished and SC should be reset to 0.
@@ -1491,8 +1568,6 @@ CheckSerial:
   cp a,$FF
   jp z,.badPacket
   ld [RemoteJoypadState],a
-
-
 
   ;Count down, filter out non-new inputs if counter is not hit
   ;RemoteJoypadActive = (RemoteJoypadState xor RemoteJoypadPrevState) and RemoteJoypadState "changed keys, but only the ones that are currently pressed"
@@ -1542,11 +1617,12 @@ CheckSerial:
   ld [RemoteJoypadActive],a
   ret
 
-
-  ;arg hl: address of palette data
-  ;arg a: address in palette data to start loading into (palette number * 2*4), plus bit 7 set (auto-increment)
-  ;clobbers b,a,hl
-  ;BCPD can't be accessed during mode 3
+/**
+* Loads one 8-byte palette into the specified location in palette RAM.
+* Watch out! BCPD can't be accessed during render mode 3
+* @param hl: source address of stored palette in WRAM
+* @param a: dest address in palette RAM to start loading into. Since palettes are 8 bytes, a = intended palette number * 8. Bit 7 (auto-increment) should be set.
+* @clobber a, b, hl*/
 LoadPaletteFromAddress:
   ldh [rBCPS],a ;3c
   ld b,$08 ;2c
@@ -1554,8 +1630,13 @@ LoadPaletteFromAddress:
   ldh [rBCPD],a ;3c
   dec b ;1c
   jr nz,:- ;3c
-  ret
+ret
 
+/**
+* Signals to the VBlank handler that BG Palette 0 should be changed to stored BG palette number 1
+* Use when "inverting" or "flashing" the BG palette.
+* @clobber a
+*/
 SetBGPalette0to1::
   ld a,(1*8)
   ld [BGPaletteChangeSrc],a
@@ -1563,8 +1644,13 @@ SetBGPalette0to1::
   ld [BGPaletteChangeDest],a
   cpl
   ld [BGPaletteChangeFlag],a
-  ret
+ret
 
+/**
+* Signals to the VBlank handler that BG Palette 0 should be changed to stored BG palette number 1
+* Used to return to the "original" BG palette.
+* @clobber a
+*/
 SetBGPalette0to0::
   ld a,(0*8)
   ld [BGPaletteChangeSrc],a
@@ -1574,8 +1660,12 @@ SetBGPalette0to0::
   ld [BGPaletteChangeFlag],a ;set flag so that palette is changed in VBlank
   ret
 
-
-;Clobbers a,de,hl
+/**
+* If BGPaletteChangeFlag is set, change the BG Palette in BGPaletteChangeDest to the stored palette in BGPaletteChangeSrc.
+* Called in the VBlank ISR. 
+* When changing these variables, set BGPaletteChangeFlag LAST, in case the VBlank ISR runs while writing to these 3 variables.
+* @clobber a,de,hl
+*/
 ModifyPalette:
   ld a,[BGPaletteChangeFlag] ;If flag is unset, do nothing
   and a
@@ -1596,8 +1686,11 @@ ModifyPalette:
   jr nz,:- ;3c
 ret
 
-;Switch to SRAMbank 0 (State Vector, save data, photo slot 0) and enable writing to it.
-;@clobber h
+/**
+* Switch to SRAMbank 0 (State Vector, save data, photo slot 0) and enable writing to SRAM.
+* Call this before running StateVector functions.
+* @clobber h
+*/
 StateVector_EnableWrite::
   ld h,$0A 
   ld [hl],h ;enable SRAM writes
@@ -1605,20 +1698,28 @@ StateVector_EnableWrite::
   ld [hl], $00 ;3c2b ; switch to SRAM bank 0: state vector
 ret
 
-SaveToFreeSlot::
-    call StateVector_EnableWrite
-    ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
-    call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
-    and a
-    jp z, .save_cleanup ;skip saving if FindAndFillFreeSlot returns 0
 
-    dec a
-    ;the bank we want to switch to, held in c, should be 1 + (slot index>>1).
-    ;Copy image data to the correct slot
-    bit 0, a
-    ld e, $FF ;if slot index is even
-    jr z,:+
-    ld e, $0F     ;if slot index is odd, set the value to add/sub from HIGH(src/dest pointer) to $0F. Otherwise, use -1 (FF)
+/**
+* Enables accessing State Vector, writes a new entry to it, writes the capture data from SRAM0 to SRAMX, 
+* generates a thumbnail+metadata, updates free counter, then disables SRAM writes.
+* Does not require StateVector_EnableWrite to run before it, as it calls it itself.
+* Callers should do their own check as to whether there is a free slot available. Silently aborts if no free slots are found, but this shouldn't be relied upon.
+* @clobber a,hl,bc,de
+*/
+SaveToFreeSlot::
+  call StateVector_EnableWrite
+  ;Find a free slot in the state vector and update the state vector while you're there, but keep ahold of the correct bank index
+  call StateVector_FindAndFillFreeSlot ;the slot index + 1 is held in a
+  and a
+  jp z, .save_cleanup ;skip saving if FindAndFillFreeSlot returns 0
+
+  dec a
+  ;the bank we want to switch to, held in c, should be 1 + (slot index>>1).
+  ;Copy image data to the correct slot
+  bit 0, a
+  ld e, $FF ;if slot index is even
+  jr z,:+
+  ld e, $0F     ;if slot index is odd, set the value to add/sub from HIGH(src/dest pointer) to $0F. Otherwise, use -1 (FF)
   :
   ;shift right and add 1 to get the bank number
   srl a
@@ -1639,7 +1740,7 @@ SaveToFreeSlot::
 
   ;Now that we've saved, update the vertical UI buffer with the new free value
   ld hl, SAVE_SLOTS_FREE
-  ld de, UIBuffer_Vertical+2
+  ld de, SidebarBuffer+2
   call UpdateByteInTilemap
 
   .save_cleanup
@@ -1647,7 +1748,12 @@ SaveToFreeSlot::
   ld [hl],h ; disable SRAM writes
 ret
 
-;Depending on the current action, either saves or prints.
+
+/**
+* Depending on Setting_OnTakeAction, saves, prints, or transfers the capture held in SRAM0.
+* Called from the viewfinder's wait-on-DMA code when a transfer is complete.
+* TODO: Also call this instead of SaveToFreeSlot in the TakeConfirm UI handler, so single-shots also match with the takecomplete setting. 
+*/
 vfCompleteAction:
   ;if setting = TAKE_ACTION_SAVE and the currentAction takes multiple pictures, call vfCompleteAction_Save_Multi
   ld a,[Setting_OnTakeAction]
@@ -1678,26 +1784,39 @@ vfCompleteAction:
 ret
 
 
-;Saves a single image
+/**Saves a single image, when only one image is taken.
+; Currently non-functional: Viewfinder initiates UI changes and other such things in the Transition state, and this would run in the CaptureComplete state.
+TODO: Should probably be removed.*/
 vfCompleteAction_Save_Single:
 
   ret
   
-;Saves a single image in a multi-image capture action
+/**Saves a single image in a multi-image capture action
+*/
 vfCompleteAction_Save_Multi:
   call SaveToFreeSlot
   ret
 
+/**
+TODO: Print via serial port.
+*/
 vfCompleteAction_Print:
 
   ret
-
+/**
+TODO: Use a bespoke transfer protocol to transfer data faster.
+  */
 vfCompleteAction_Xfer:
 
   ret
 
-;returns de rightshifted a times
-;clobbers de, a, leaves a at 0
+/**
+* Rightshifts de a times.
+* Used by NextElementGeometric_Add/Sub to calculate next C-value in a geometric sequence.
+* @clobber de, a
+* @return a: 0
+* @return de: de >> a
+*/
 rshift16: ;(a: number of right shifts, de: value to shift)
   .loop
   sra d
@@ -1706,10 +1825,15 @@ rshift16: ;(a: number of right shifts, de: value to shift)
   jr nz, .loop
 ret
   
-;@param hl: currentValue
-;@param a: number of shifts
-;@clobber: a,hl
-;@return: next element up in the sequence currentValue + currentValue>>a, clipped to $FFFF
+/**
+* Calculates the next value in the sequence currentValue + currentValue>>a, clipped to $FFFF
+* Mathematically, this is currentValue*(1 + 2**-a)
+* Used in AEB mode to calculate the next C-value to use to capture.
+* @param hl: currentValue
+* @param a: number of shifts
+* @clobber a,hl
+* @return hl: value of next element in the sequence
+*/
 NextElementGeometric_Add:
   push de
   ld d,h
@@ -1723,10 +1847,15 @@ NextElementGeometric_Add:
   ld l,h
 ret
   
-;@param hl: currentValue
-;@param a: number of shifts
-;@clobber: a, hl
-;@return: next element up in the sequence currentValue + currentValue>>a, clipped to $FFFF
+/**
+* Calculates the next value in the sequence currentValue - currentValue>>a, clipped to $0100
+* Mathematically, this is currentValue*(1 - 2**-a)
+* Used in AEB mode to calculate the next C-value to use to capture.
+* @param hl: currentValue
+* @param a: number of shifts
+* @clobber a,hl
+* @return hl: value of next element in the sequence
+*/
 NextElementGeometric_Sub: ;(HL: currentValue a:number of shifts)
   push de
   ld d,h
@@ -1747,10 +1876,13 @@ NextElementGeometric_Sub: ;(HL: currentValue a:number of shifts)
   ret nz
   ld l,a
   ld h,$01
-
 ret
 
-;Fill the AEB List with a center value, (count-1)/2 overexposed values, and (count-1)/2 underexposed values.
+/**
+* Fill the BurstExposureList (used for AEB shots) with a center value, (count-1)/2 overexposed values, and (count-1)/2 underexposed values.
+* First fills center of list, then overexposed counting up from center, then underexposed from the start of the list.
+* Since it counts up based on an increment from center value, the underexposed values will get progressively darker, jump to the center value, and get progressively lighter.
+*/
 FillAEBList::
   .fillCenter
   ;Assuming odd count, place the center C-value in index (count-1)/2
@@ -1806,10 +1938,10 @@ FillAEBList::
   
   ;Then, place underxposed C-values in indices ((count-1)/2 + 1) through (count-1)
   pop hl ;retrieve current C-value into hl
-  ;initialize counter of overexposed images (count-1)/2
+  ;initialize counter of underexposed images (count-1)/2
   ld a,[Setting_AEB_Count]
   srl a
-  ld d,a ;d = counter (number of overexposed images to take), loop terminates when counter is 0
+  ld d,a ;d = counter (number of underexposed images to take), loop terminates when counter is 0
   ld a,[Setting_AEB_Interval]
   ld e,a ;e = number of shifts
   ;      put counter in d
@@ -1835,16 +1967,19 @@ FillAEBList::
 
   ret
 
-;@param
-;@clobber a,hl
-;@return hl: C-value to use in the next capture, big-endian (A00x/register order)
+/**
+* Returns the exposure/C-value to use for the next shot in a burst/AEB shot.
+* Retrieves this value from BurstExposureList[BurstShotCurrentCapture].
+* @clobber a,hl
+* @return hl: C-value to use in the next capture, big-endian (A00x/register order)
+*/
 GetAEBExposure::
   ld a,[BurstShotCurrentCapture] ;a = index within BurstExposureList
   add a,a ;a = offset within BurstExposureList
   ld hl, BurstExposureList
   add a,l
   ld l,a ;hl = &BurstExposureList[BurstShotCurrentCapture]
-  ld a,[hli]
+  ld a,[hli] ;dereference [hl] into hl
   ld h, [hl]
   ld l,a
 ret
@@ -1855,7 +1990,7 @@ ret
 
     ;-------------------------------------------DATA-------------------------------
 Palette:
-PaletteBG:
+PaletteBG: ;TODO: This is a misnomer; however, at the moment, we use the same source palette for OBJ and BG palettes.
 PaletteOBJ:
     ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
     ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
