@@ -22,7 +22,7 @@ DEF CHECKSUM_XOR_ADDR_ECHO EQU $A000+$11FB
 ; Updating the backup echo checksums requires we do all this over again or it will be buggy-- just copy the vector wholesale at the end of each multi-byte_transaction.
 ;Args   a = value of new byte
 ;       hl = address of byte to change
-;clobbers ALL registers except C, so we may need to pop/push register state beforehand
+;clobbers a, b, de, so we may need to pop/push register state beforehand
 ;push/pops make it only clobber af
 StateVector_WriteByte:
 ;d = new byte value
@@ -52,7 +52,7 @@ pop bc
 ret
 
 
-;Iterates through the state vector (using repeated calls to FindByDisplayNumber). When it finds a display number that is greater than the missing number and less than 1E,
+;Iterates through the state vector (using repeated calls to FindByDisplayNumber). When it finds a display number that is greater than or equal to the missing number and less than 1E,
 ; it decrements it by 1.
 ;arg c: value that is missing from the SV
 ;clobbers c, hl, a
@@ -63,11 +63,11 @@ StateVector_FixMissingVal:
     ld hl, STATEVECTOR_START_ADDR
 .loop: 
     ld a,[hl]
-    cp a,$FF;if SV val is $FF (empty slot), skip it
-    jp z,:+ 
+    cp a,$1E;if SV val is >=1E (empty slot), skip it
+    jr nc,:+ 
     cp a, c ; carry if SV val < missing; no-carry if SV val >= missing
-    jr c, :+
-    dec a ;SV value > missing: decrement it by one
+    jr c, :+ ; if SV val < missing (c), then we should skip it.
+    dec a ;SV value >= missing: decrement it by one
     call StateVector_WriteByte
 
     :inc l
@@ -85,7 +85,7 @@ StateVector_FixAll:
     call StateVector_FindMissing ;compare the retval from this (a) to the max returned in
     ;if missing value is less than max, fix it, decrement the max by 1, and loop. Missing value should never be equal to max.
     cp a,b ; carry if missing val < max
-    jr nc, :+
+    jr nc, :+ ; jump if missing>=max
     ld c,a ; FixMissingVal takes c as the argument, so we should fix this
     call StateVector_FixMissingVal
     dec b
@@ -96,6 +96,7 @@ StateVector_FixAll:
 ;returns a as the value missing from the state vector. 
 ;If none are missing but the state vector isn't full, it returns max+1 (up to 1E)
 ;clobbers a,hl
+;Must not modify b, as it's used to store max in StateVector_FixAll
 StateVector_FindMissing:
   xor a ; a = value to compare to/"outer counter" goes from 0 to (max-1)
   .loop:
@@ -135,8 +136,8 @@ StateVector_GetMax:
   ld c, $1E
   .loop:
     ld a,[hli]
-    cp a, $FF
-    jp z, .loopcheck ;skip if $FF
+    cp a, $1E
+    jr nc, .loopcheck ;skip if >= 1E
     cp a, b
     jp c, .loopcheck ;if running_max > value, (carry) then skip
     ld b,a

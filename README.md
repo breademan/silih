@@ -7,9 +7,10 @@ Currently, it is missing several important features.
 
 ## Current Features
 - Modify the camera registers and contrast setting
-- Take a picture
+- Upside-down down version for systems like the GBA SP
 - Remote control over the link cable
-- Burst shot and AEB (Automatic Exposure Bracketing) mode
+- Burst shot and AEB (Automatic Exposure Bracketing) modes
+- Quickly switch between the original ROM and Silihcam with the press of two buttons
 
 ## Planned Features
 - Printing support
