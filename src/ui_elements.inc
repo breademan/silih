@@ -18,12 +18,12 @@
   X CamOptV_RAM,          $11,  $00, $00, $07, ModifyCamOptV_UI
 ;  X CamOptVH_RAM,         $13,  $00, $00, $03, ModifyCamOptVH_UI ;this is meant to be blank at the moment
 ;Temporary debugging entry for serial data
-  X CamOptDitherPattern,  $13,  $01, $00, $FF, ModifyDitherPattern_UI
+  X NullVar,              $13,  $01, $00, $FF, ModifyNothing_UI
   X CamOptEdgeMode,       $10,  $00, $00, $03, ModifyEdgeMode_UI 
   X CamOptE_RAM,          $0E,  $00, $00, $07, ModifyCamOptE_UI
   X CamOptContrast,       $15,  $00, $00, $0F, ModifyContrast_UI
-  X CamOptDitherTable,    $16,  $00, $00, $02, ModifyDitherTable_UI
-  X CamOptDitherPattern,  $1F,  $00, $00, $01, ModifyDitherPattern_UI
+  X CamOptDitherTable,    $14,  $00, $00, $02, ModifyDitherTable_UI
+  X CamOptDitherPattern,  $16,  $00, $00, $06, ModifyDitherPattern_UI
 PURGE X
 
 
