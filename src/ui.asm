@@ -913,6 +913,7 @@ Inc_nybble_position_a_into_c:
 ModifyCamOptN_UI:
   ld hl,CamOptN_RAM
   call ModifyNybble
+ModifyNothing_UI:
   jp MenuHandler_Selected.modifyValueTail
 ModifyCamOptC_UI: 
   ld hl,CamOptC_RAM
@@ -950,6 +951,7 @@ ModifyDitherTable_UI:
 ModifyDitherPattern_UI:
   ld hl,CamOptDitherPattern
   call ModifyNybble
+  call PrepareDitherPattern
   jp MenuHandler_Selected.modifyValueTail
 ModifyEdgeMode_UI:
   ld hl,CamOptEdgeMode

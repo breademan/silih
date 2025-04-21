@@ -68,6 +68,7 @@ InitVariables:
   ldh [SettingsNybble],a
   ldh [vfCurrentAction],a
   ldh [vfNextAction],a
+  ld [CamOptDitherPattern],a
 
   ld a, $01
   ld [ShowPromptsFlag], a
