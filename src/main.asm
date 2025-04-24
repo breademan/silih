@@ -98,9 +98,11 @@ ENDU
   SidebarBuffer:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
   BurstExposureList: ds $1E ; Stored little-endian, same as CamOptC_RAM, opposite of CamOptA00x
                             ; to hold $0F C-values, we need $0F * 2 bytes
+  SerialEnable:: db  ; This is used by printing logic to tell the serial input logic to stop. Initialized to 1. 
+                    ; When 0, we should stop initiating transfers with the remote control, since these will interfere with the printer's transfers.
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
-  ;Cumulative $FA bytes
-  ;$06 bytes remaining
+  ;Cumulative $FB bytes
+  ;$05 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
@@ -1556,6 +1558,12 @@ memcmp::
 ret
 
 /**
+* Function on ROM -- gets input and updates several variables.
+* clobber a, ???? but not d
+*/
+GetInputPtr: jp $0000
+
+/**
 * Sets the registers as if not-CGB and jumps back to the launcher ROM, which launches the alternate payload.
 */
 LaunchAlternativePayload::
@@ -1571,13 +1579,12 @@ GetSerialInput:
   ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip serial transfer
   and a
   ld d,a ;Store Setting_SerialRemote in d. ROM's getInput doesn't clobber c,d,e
-  jr z,GetInputPtr
+  jr z,:+
   .startTransfer
   ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
   ldh [rSC], a
   ;Input format is D U L R: START SEL A B
-  GetInputPtr: call $0000
-
+  : call GetInputPtr
   ld a,d   ; If serial remote is disabled, skip
   and a
   ret z

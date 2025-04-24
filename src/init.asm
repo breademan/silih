@@ -72,6 +72,7 @@ InitVariables:
 
   ld a, $01
   ld [ShowPromptsFlag], a
+  ld [SerialEnable],a
 
   ld a,$03
   ld [CamOptEdgeMode],a
