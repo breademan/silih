@@ -123,7 +123,7 @@ MainLoop:
   xor a
   ldh [VBlank_finished_flag],a ;clear the VBlank finished flag
 
-  call GetSerialInput
+  call GetInput
 
   ld a, UI_RAMBANK
   ldh [rSVBK], a
@@ -1561,7 +1561,7 @@ ret
 * Function on ROM -- gets input and updates several variables.
 * clobber a, ???? but not d
 */
-GetInputPtr: jp $0000
+GetInputROM: jp $0000
 
 /**
 * Sets the registers as if not-CGB and jumps back to the launcher ROM, which launches the alternate payload.
@@ -1572,22 +1572,29 @@ LaunchAlternativePayload::
   jp $100 ; jp back to launcher ROM
 
 /**
+* Gets input, whether from keypad or remote control, and puts it into joypad_active.
+*/
+GetInput:
+ld a,[Setting_SerialRemote]
+ld d, a
+ld a,[SerialEnable]
+and a,d ; a = Setting_SerialRemote & SerialEnable
+jr nz,:+ ; If it's OK to use the serial port, jump.
+call GetInputROM
+ret
+:call GetSerialInput
+ret
+
+/**
 * Gets input and puts it into joypad_active
 * If Setting_SerialRemote is set, also initiates a serial transfer and updates joypad_active from serial controller.
 */
 GetSerialInput:
-  ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip serial transfer
-  and a
-  ld d,a ;Store Setting_SerialRemote in d. ROM's getInput doesn't clobber c,d,e
-  jr z,:+
   .startTransfer
   ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
   ldh [rSC], a
   ;Input format is D U L R: START SEL A B
-  : call GetInputPtr
-  ld a,d   ; If serial remote is disabled, skip
-  and a
-  ret z
+  : call GetInputROM
   ;Here, the transfer should be finished and SC should be reset to 0.
   ;TODO: wait for SC to be low, with timeout. Currently we just assume the transfer finished.
   ldh a,[rSB]

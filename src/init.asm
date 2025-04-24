@@ -171,9 +171,9 @@ InitInput:
 	
 	;Put the address into the 2nd/3rd bytes of a CALL n16 instruction
 	ld a, [hli] 	;1b2c
-	ld [GetInputPtr+1], a ;3b4c low bit
+	ld [GetInputROM+1], a ;3b4c low bit
 	ld a, [hli]	;1b2c
-	ld [GetInputPtr+2], a ; 3b4c high bit
+	ld [GetInputROM+2], a ; 3b4c high bit
 
 InitPalettes:
 ld a, $80
