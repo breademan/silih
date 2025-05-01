@@ -1561,7 +1561,7 @@ ret
 * Function on ROM -- gets input and updates several variables.
 * clobber a, ???? but not d
 */
-GetInputROM: jp $0000
+GetInputROM:: jp $0000
 
 /**
 * Sets the registers as if not-CGB and jumps back to the launcher ROM, which launches the alternate payload.
@@ -1574,7 +1574,7 @@ LaunchAlternativePayload::
 /**
 * Gets input, whether from keypad or remote control, and puts it into joypad_active.
 */
-GetInput:
+GetInput::
 ld a,[Setting_SerialRemote]
 ld d, a
 ld a,[SerialEnable]

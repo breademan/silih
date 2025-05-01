@@ -1,9 +1,11 @@
 DEF UI_RAMBANK EQU 1
 DEF STOCK_RAMBANK EQU 7
+DEF SCRATCH_RAMBANK EQU 7 ; When not running the ROM, this bank is unused, but will not retain data across handovers. This makes it perfect for storing large but temporary data.
 DEF TEST_CALLER_RAMBANK EQU 3
 DEF TEST_CALLEE_RAMBANK EQU 4
 DEF BACKUP_BANK EQU 6 ; Also stores the alternative payload for the loader, so don't set it to 7, as the location corresponding to bank 7 won't fit in 32K ROM space.
 DEF GRAPHICS_BANK EQU 2
+DEF PRINTER_RAMBANK EQU 5
 ;DEF SAVE_RAMBANK EQU 2
 ;DEF INIT_RAMBANK EQU 2
 DEF JOYPAD_DOWN EQU 7
@@ -160,3 +162,11 @@ DEF CAMERA_MODE_AEB EQU 2
 
 
 DEF ROM_OAM_DMA_WAITLOOP_COUNT EQU $0D
+
+DEF PRINTER_CMD_INIT EQU $01
+DEF PRINTER_CMD_PRINT EQU $02
+DEF PRINTER_CMD_DATA EQU $04
+DEF PRINTER_CMD_STATUS EQU $0F
+
+DEF PRINTER_COMPRESSION_OFF EQU $00
+DEF PRINTER_COMPRESSION_ON EQU $01

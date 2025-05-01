@@ -1472,7 +1472,13 @@ Setting_AEB_Interval_Sanitize:
 ret
 
 Init_PrintAll:
-  ;TODO
+  ld hl, ActionDetectPrinter ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+
+  ld hl, ActionPrintAll ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
 ret
 
 Init_SaveSettings:

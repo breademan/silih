@@ -17,7 +17,7 @@ cgb_rom := bin/$(cgb_name:.asm=.gbc)
 
 all:	bin/silih.gbc
 
-bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o bin/remote.o bin/graphics.o
+bin/silih.gbc: bin/loader.o bin/main.o bin/trampoline_test_callee.o bin/trampoline_test_caller.o bin/ui.o bin/hram.o bin/remote.o bin/graphics.o bin/printer.o
 	$(LD) $(LDFLAGS) $@ $^
 	$(FX) $(FXFLAGS) $@
 		
