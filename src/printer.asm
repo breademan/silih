@@ -11,14 +11,98 @@ ActionPrintAll::
   ;TODO: Stubbed to just point to 01:A000
   ;Set hl to the address of our photo start and switch to the appropriate SRAM bank.
   ;Switch to RAMbank 01:
-  ld hl,$A000
-  ld a,$01
-  ld [$4000], a ;switch SRAM bank to 01
+  ld a,30 ;Initialize picture counter -- TODO: Set it to however many pictures you actually have in active slots
+  ld [PrintAll_ToPrint],a ;TODO: replace this too
+  
+  ld a,[PrintAll_ToPrint]
+  and a
+  jr z,.allPhotosFinished ;if number of photos to print, determined by the state vector, is 0, finish up early.
+
+  xor a
+  ld [PrintAll_PictureCounter],a ;Initialize photo counter to 0
+
+.printPhotoLoop
+
+  ;Set hl and rRAMB to the appropriate numbers. hl = $A000 if ID is even, $B000 if odd
+  ld a,[PrintAll_PictureCounter]  ;TODO: We're not looking at an even-or-odd image NUMBER 
+                                  ;(which tells you nothing about the address without looking up which slot it takes up in the SV)
+                                  ;but for an even or odd image SLOT
+                                  ;Therefore, after loading the PictureCounter, we should call a function that returns which slot the photo number is located in
+                                  ;return it in register a
+                                  ;For testing, just ignore active/inactive values and pretend the slot number IS the photo number, so just print slots in order
+  ld hl,$A000 ;Set hl to $A000 if even (default case)
+  bit 0,a
+  jr z,.evenSlotID ;if SLOT number is even, address starts at $A0, else $B0
+    ld h,$B0 ;slot number is odd, location is B0
+  .evenSlotID
+
+  ;with a=slot ID of photo,
+  srl a ;a = SlotID >> 1
+  inc a ;a =(SlotID>>1)+1
+  ld [rRAMB], a ;switch SRAM bank to the appropriate SRAM bank
 
   call SendTransaction_PrintPhoto_NoFrame
+
+  ;Error Checking
+  ;If d!=0 (keepalive byte wrong) break the whole loop and don't attempt to print more pictures.
+    ld a,d
+    and a
+    jr nz,.keepaliveFail
+    ;If we receive some kind of error that implies we can't continue (top 4 bytes), don't attempt to print more pictures.
+    ld a,e
+    and a,%11110000
+    jr nz,.generalError  
+  ;TODO: if checksum error, attempt resend a few times without incrementing the counter and checking it's the end.
+  ;TODO: this is an infinite loop. Add a retry counter local variable, initialize it at the start of PrintAll, and test it here
+    ;ld a,e
+    ;bit 0,a
+    ;jr z,.checksumGood
+    ;.checksumBad
+    ; ;increment retry counter,check if you've passed the threshold for retries, and terminate early if so.
+    ;jr .printPhotoLoop
+
+  .checksumGood
+  
+  ;TODO: If no bad checksum, reset the retry counter
+  ;
+  
+  ;TODO: Display to user: printing photo (X), without asking for input
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+
+
+
+  ;Increment PictureCounter, then finish when it is equal to the number of photos to print
+    ;Don't touch de (return value from the photo print) -- hl is OK, since our next photo has a very different address anyway.
+    ld a,[PrintAll_PictureCounter]
+    inc a 
+    ld [PrintAll_PictureCounter],a ;increment counter and store it back
+    ld b,a ;store counter in b
+    ld a,[PrintAll_ToPrint]
+    cp a,b ;cp ToPrint, (ID of next photo to print)
+    jr z,.allPhotosFinished ;if all photos are finished printing, finish.
+  
+  ;If no errors and loop not finished, jump back to the beginning.
+  jr .printPhotoLoop
+
+
+  .generalError
+  .keepaliveFail
+  .allPhotosFinished
   ld h,d
   ld l,e
   call PrinterDebug_DisplayResult
+  xor a
+  ldh [rIF],a
+reti
+
+;These local variables for ActionPrintAll exist because pushing/popping after each print makes register handling and conditionals more complicated.
+PrintAll_PictureCounter: db ;local variable that holds the ID of the current photo to print. Always starts at 0. Iterates through photo IDs $00-$1D
+PrintAll_ToPrint: db ;local variable that holds the number of photos to print
+
+
+ActionPrintActive:
+  di
+
   xor a
   ldh [rIF],a
 reti
@@ -32,8 +116,8 @@ reti
 */
 SendTransaction_PrintPhoto_NoFrame:
   ;TODO: Ensure printer is connected by getting printer status.
-  ;TODO: clear buffer with an Init packet
-  ;Send 7 data packets
+  ;TODO: clear buffer with an Init packet before sending packet
+ ;Send 7 data packets
   ld c,$07 ;Counter for number of packets data packets to send
   : push bc
     call SendPacket_TwoLines_NoFrame
@@ -49,11 +133,13 @@ SendTransaction_PrintPhoto_NoFrame:
     ret nz ;if z, all is good. Else return early.
     dec c
   jr nz,:-
-  ;Send empty data packet before printing
+  ;Send empty data packet before printing -- if we don't do this, the printer will send a packet error.
+  
   call SendPacket_EmptyData
-  ;Error checking: if d is not zero, return and pass it up to the display function.
   ld d,h
   ld e,l
+
+  ;Error checking: if d is not zero, return and pass it up to the display function.
   ld a,d
   and a
   ret nz ;if keepalive response is wrong, exit early
@@ -75,6 +161,58 @@ SendTransaction_PrintPhoto_NoFrame:
   ld a,e
   and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
   ret nz ;if z, all is good. Else return early.
+
+  .waitForPrintStart
+  ;TODO easy out without timeout: if user presses B, return
+
+  ;Wait for print command to start, with timeout of ?how many? tries
+  call SendTransaction_DetectPrinter ;this returns its results in hl instead of de. 
+  ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
+  ld e,l
+  
+  ;Error checking: if d is not zero, return and pass it up to the display function.
+  ld a,d
+  and a
+  ret nz ;if keepalive response is wrong, exit early
+  ;Error checking: if e is not what is expected, return and pass it up to the display function.
+  ld a,e
+  and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
+  ret nz ;if z, all is good. Else return early.
+
+  ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
+  ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
+  ;or should we skip the check for printing START and check only for printing STOPPED (bit 1 unset, bit 3 unset)
+  ;The very fast Pico Printer might shut off the "currently printing" flag before we get a chance to read it, leading to an infinite loop of waiting for print to start when it already has.
+  bit 1,e
+  ;if not printing, loop until it is
+  ;TODO: Add a WAIT_FOR_PRINT_START timeout
+  jr z,.waitForPrintStart
+
+.waitForPrintEnd
+  ;TODO: Easy out with no timeout: if user presses B, exit without timeout
+
+  ;Wait for print command to finish, with timeout of ?how many? seconds
+  call SendTransaction_DetectPrinter ;this returns its results in hl instead of de. 
+  ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
+  ld e,l
+  
+  ;Error checking: if d is not zero, return and pass it up to the display function.
+  ld a,d
+  and a
+  ret nz ;if keepalive response is wrong, exit early
+  ;Error checking: if e is not what is expected, return and pass it up to the display function.
+  ld a,e
+  and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
+  ret nz ;if z, all is good. Else return early.
+
+  ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
+  ;Wait for bit 1 unset
+  ;Todo: add timeout, if the printer somehow ends up getting "stuck" printing
+  bit 1,e
+  ;if not printing, loop until it is
+  ;TODO: Add a WAIT_FOR_PRINT_START timeout
+  jr nz,.waitForPrintEnd
+
 ret
 
 /**
@@ -318,6 +456,13 @@ ActionDetectPrinter::
   ldh [rIF],a
 reti
 
+/**
+* Displays two bytes on the Settings screen, then waits for 16 frames and a button press.
+*This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
+*@param h: keepalive result, 0 for a success, other for fail
+*@param l: status register
+*@clobber a,b,de
+*/
 PrinterDebug_DisplayResult:
   ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
   :ldh a,[rSTAT] ;Wait for HBlank
@@ -493,5 +638,55 @@ SendMagicBytes:
   ld b,$33
   call SendByte_b
 ret
+
+/**
+* Displays two bytes on the Settings screen, then waits for 16 frames and a button press.
+*This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
+*@clobber a,b,de,hl
+*/
+PrinterDebug_DisplayCurrentPrintingPhoto:
+  ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
+  :ldh a,[rSTAT] ;Wait for HBlank
+  and a,%00000011
+  jr nz,:-
+  ;wait for VBlank
+  :ldh a,[rSTAT]
+  and a,%00000011
+  cp a,$01
+  jr nz,:-
+  ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
+  ;$9C50 is the right 4 tiles and should be overwritten once we get back to the main loop.
+  ld de,$9C50  ;ignores flip
+  ld a,[PrintAll_PictureCounter]
+  ld h,a ;temporarily store the picture number in h
+  ;h: keepalive packet: 0 (ok) or 1 (bad)
+  ld a,h ;high 
+  swap a
+  and a,$0F
+  add a,$60
+  ld [de],a
+  inc de
+  ld a,h ;low nybble
+  and a,$0F
+  add a,$60
+  ld [de],a
+  inc de
+
+  ;Wait 16 frames to display it
+  ld b,$10
+  .displayWait
+  :ldh a,[rSTAT] ;Wait for HBlank
+  and a,%00000011
+  jr nz,:-
+  ;wait for VBlank
+  :ldh a,[rSTAT]
+  and a,%00000011
+  cp a,$01
+  jr nz,:-
+  dec b
+  jr nz,.displayWait
+
+ret
+
 
 ENDL
