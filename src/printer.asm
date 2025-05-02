@@ -66,7 +66,7 @@ ActionPrintAll::
   ;TODO: If no bad checksum, reset the retry counter
   ;
   
-  ;TODO: Display to user: printing photo (X), without asking for input
+  ;Display to user: printing photo and step within the sendtransaction without asking for input
   call PrinterDebug_DisplayCurrentPrintingPhoto
 
 
@@ -88,6 +88,16 @@ ActionPrintAll::
   .generalError
   .keepaliveFail
   .allPhotosFinished
+  push af
+  push bc
+  push de
+  push hl
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+  pop hl
+  pop de
+  pop bc
+  pop af
+
   ld h,d
   ld l,e
   call PrinterDebug_DisplayResult
@@ -100,6 +110,9 @@ PrintAll_PictureCounter: db ;local variable that holds the ID of the current pho
 PrintAll_ToPrint: db ;local variable that holds the number of photos to print
 
 
+/**
+* Prints the photo in the active photo slot
+*/
 ActionPrintActive:
   di
 
@@ -116,8 +129,32 @@ reti
 */
 SendTransaction_PrintPhoto_NoFrame:
   ;TODO: Ensure printer is connected by getting printer status.
+
+  xor a
+  ld [InTransaction_StepNumber],a ;Step 0, send init packet
   ;TODO: clear buffer with an Init packet before sending packet
- ;Send 7 data packets
+  push hl
+  call SendPacket_Init
+  ld d,h
+  ld e,l
+  pop hl
+  ;Error checking: if d is not zero, return and pass it up to the display function.
+  ld a,d
+  and a
+  ret nz ;if keepalive response is wrong, exit early
+  ;Error checking: if e is not what is expected, return and pass it up to the display function.
+  ;For TwoLine packets, we expect a status byte with only bit 3 possibly set, and with bit 2 set at the end of the transaction.
+  ld a,e
+  and a,%11110001 ;ignore unprocessed data, image data full, currently printing statuses, and checksum
+  ret nz ;if z, all is good. Else return early.
+
+  ;TODO: Send status until "unprocessed data" flag is unset, waiting a bit between packets
+
+
+
+  ;Send 7 data packets
+  ld a,$01
+  ld [InTransaction_StepNumber],a ;Step 1, send multiple lines
   ld c,$07 ;Counter for number of packets data packets to send
   : push bc
     call SendPacket_TwoLines_NoFrame
@@ -133,8 +170,10 @@ SendTransaction_PrintPhoto_NoFrame:
     ret nz ;if z, all is good. Else return early.
     dec c
   jr nz,:-
+
   ;Send empty data packet before printing -- if we don't do this, the printer will send a packet error.
-  
+  ld a,$02 ; Step 2: send empty data packet before printing
+  ld [InTransaction_StepNumber],a
   call SendPacket_EmptyData
   ld d,h
   ld e,l
@@ -150,6 +189,8 @@ SendTransaction_PrintPhoto_NoFrame:
   ret nz ;if z, all is good. Else return early.
 
 
+  ld a,$03 ; Step 3: send print packet.
+  ld [InTransaction_StepNumber],a
   ;Send a print command
   call SendPacket_Print
   ;Error checking: if d is not zero, return and pass it up to the display function.
@@ -162,6 +203,8 @@ SendTransaction_PrintPhoto_NoFrame:
   and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
   ret nz ;if z, all is good. Else return early.
 
+  ld a,$04 ; Step 4: Loop wait for printer start
+  ld [InTransaction_StepNumber],a
   .waitForPrintStart
   ;TODO easy out without timeout: if user presses B, return
 
@@ -188,6 +231,9 @@ SendTransaction_PrintPhoto_NoFrame:
   ;TODO: Add a WAIT_FOR_PRINT_START timeout
   jr z,.waitForPrintStart
 
+  ld a,$05 ; Step 5: Loop wait for printer end
+  ld [InTransaction_StepNumber],a
+
 .waitForPrintEnd
   ;TODO: Easy out with no timeout: if user presses B, exit without timeout
 
@@ -205,6 +251,14 @@ SendTransaction_PrintPhoto_NoFrame:
   and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
   ret nz ;if z, all is good. Else return early.
 
+  ;Wait here by displaying the photo number and step. (1 frames ~ 17ms)
+  ;Real printer seems to be getting spammed with too many packets during this waitloop, adding the debug function ALMOST  fixes it
+  ;we get to photo 8 before 0106 keepalive failed/ 0805 (on photo 8 step 5)
+  ;also error at 0183 / 0705 -- this seems to imply we still have problems occurring in step 5....
+  ; This implies to me it's a probabalistic error caused by packets being too close apart.
+  push de
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+  pop de
   ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
   ;Wait for bit 1 unset
   ;Todo: add timeout, if the printer somehow ends up getting "stuck" printing
@@ -212,6 +266,9 @@ SendTransaction_PrintPhoto_NoFrame:
   ;if not printing, loop until it is
   ;TODO: Add a WAIT_FOR_PRINT_START timeout
   jr nz,.waitForPrintEnd
+
+  ld a,$06 ; Step 6: Wait for printer has ended
+  ld [InTransaction_StepNumber],a
 
 ret
 
@@ -245,6 +302,36 @@ EmptyDataPacket: ;Does not include keepalive or status byte
   db $04,$00,$00,$00,$04,$00
 .end
 
+/**
+*@return h: keepalive packet -- zero if OK, 1 otherwise
+*@return l: status byte of printer
+;@clobber a,bc,hl
+*/
+SendPacket_Init:
+  call SendMagicBytes
+  ld hl,InitPacket
+  ld c,(InitPacket.end-InitPacket)-1
+  call SendMulti_hl_c
+  ;Send keepalive byte
+  ld b,$00
+  call SendByte_b
+  ldh a,[rSB]
+  ld h,$01 ;h will b 1 if no keepalive, 0 if keepalive
+  cp a,$81
+  jr nz,:+
+    ld h,$00
+  :cp a,$80
+  jr nz,:+
+    ld h,$00
+  :;Request printer status
+  ld b,$00
+  call SendByte_b
+  ldh a,[rSB]
+  ld l,a ;l = status byte of printer
+ret
+InitPacket:
+  db PRINTER_CMD_INIT,PRINTER_COMPRESSION_OFF,$00,$00,$01,$00
+  .end
 
 /**
 * Sends a packet that contains two tilelines (160x16), 2bpp of an image.
@@ -442,7 +529,7 @@ SendTransaction_DetectPrinter:
   ld b,$00
   call SendByte_b
   ldh a,[rSB]
-  ld l,a ;l = status byte of printer
+  ld l,a ;l   = status byte of printer
 ret
 PrinterDetectionSequence: ;Does not include keepalive or status byte
   db $0F,$00,$00,$00,$0F,$00
@@ -539,7 +626,7 @@ SendByte_b:
   ldh [rSB],a
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE
+  ld a, SCF_START | SCF_SOURCE | SCF_SPEED
   ldh [rSC],a
   ;Wait for transmission to end
   :ldh a,[rSC]
@@ -562,7 +649,7 @@ SendByte_b_checksum_de:
   ldh [rSB],a
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE
+  ld a, SCF_START | SCF_SOURCE | SCF_SPEED
   ldh [rSC],a
 
   .addChecksum
@@ -640,7 +727,8 @@ SendMagicBytes:
 ret
 
 /**
-* Displays two bytes on the Settings screen, then waits for 16 frames and a button press.
+* Displays two bytes (the currently printing photo number) on the Settings screen, then waits for 16 frames and a button press.
+* Also displays the step number within the SendTransaction
 *This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
 *@clobber a,b,de,hl
 */
@@ -656,7 +744,8 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   jr nz,:-
   ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
   ;$9C50 is the right 4 tiles and should be overwritten once we get back to the main loop.
-  ld de,$9C50  ;ignores flip
+  ld de,$9C50  ;ignores 
+  
   ld a,[PrintAll_PictureCounter]
   ld h,a ;temporarily store the picture number in h
   ;h: keepalive packet: 0 (ok) or 1 (bad)
@@ -671,6 +760,18 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   add a,$60
   ld [de],a
   inc de
+
+  ;Load step number
+  ld a,[InTransaction_StepNumber]
+  swap a
+  and a,$0F
+  add a,$60
+  ld [de],a
+  inc de
+  ld a,[InTransaction_StepNumber]
+  and a,$0F
+  add a,$60
+  ld [de],a
 
   ;Wait 16 frames to display it
   ld b,$10
