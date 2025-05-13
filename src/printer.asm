@@ -5,6 +5,63 @@ SECTION "Printer SECTION",ROM0[$1000 + ($1000*PRINTER_RAMBANK)]
 Printer_Storage::
 LOAD "Printer LOAD", WRAMX [$D000]
 
+;Less significant bits (starting from 0) are higher priority?
+
+
+; Errors returned by a packet
+DEF PACKET_ERR_BIT_KEEPALIVE EQU 7
+DEF PACKET_ERR_BIT_STATUS EQU 6
+DEF PACKET_ERR_BIT_CHECKSUM EQU 5
+
+DEF PACKET_RET_OK EQU $00
+DEF PACKET_ERR_MASK_CHECKSUM EQU %00000001 << PACKET_ERR_BIT_CHECKSUM
+DEF PACKET_ERR_MASK_KEEPALIVE EQU %00000001 << PACKET_ERR_BIT_KEEPALIVE
+DEF PACKET_ERR_MASK_STATUS EQU %00000001 << PACKET_ERR_BIT_STATUS
+
+; Errors returned by a transaction
+DEF TRANSACTION_ERR_BIT_KEEPALIVE EQU 7
+DEF TRANSACTION_ERR_BIT_STATUS EQU 6
+DEF TRANSACTION_ERR_BIT_CHECKSUM EQU 5
+DEF TRANSACTION_ERR_BIT_STEP_TIMEOUT EQU 4
+
+DEF TRANSACTION_RET_OK EQU $00
+DEF TRANSACTION_ERR_MASK_CHECKSUM EQU %00000001 << TRANSACTION_ERR_BIT_CHECKSUM
+DEF TRANSACTION_ERR_MASK_KEEPALIVE EQU %00000001 << TRANSACTION_ERR_BIT_KEEPALIVE
+DEF TRANSACTION_ERR_MASK_STATUS EQU %00000001 << TRANSACTION_ERR_BIT_STATUS
+
+; Errors returned by a transaction set.
+DEF ACTION_ERR_BIT_KEEPALIVE EQU 7
+DEF ACTION_ERR_BIT_STATUS EQU 6
+DEF ACTION_ERR_BIT_CHECKSUM EQU 5
+DEF ACTION_ERR_BIT_STEP_TIMEOUT EQU 4
+
+DEF ACTION_RET_OK EQU $00
+DEF ACTION_ERR_MASK_CHECKSUM EQU %00000001 << ACTION_ERR_BIT_CHECKSUM
+DEF ACTION_ERR_MASK_KEEPALIVE EQU %00000001 << ACTION_ERR_BIT_KEEPALIVE
+DEF ACTION_ERR_MASK_STATUS EQU %00000001 << ACTION_ERR_BIT_STATUS
+
+
+DEF CHECKSUM_RETRIES EQU 3
+
+
+;Printer Variables
+;SendPacket_* local vars
+Packet_Checksum_RetryCount: db ;When a packet gets a "bad checksum" error (status bit 0), the packet should retry sending a certain number of times before giving up.  
+
+;Transaction local vars
+;In a transaction, this is set to the step number within the transaction before the packet is sent.If something goes wrong, we can display this step number for debugging.
+InTransaction_StepNumber: db 
+;When sending a conditional loop of packets, such as when waiting for printing to start/finish, waiting for buffer to clear, etc, this is used to prevent infinite loops using a timeout.
+Transaction_StepTimeoutCounter: db
+;Action local vars
+Transaction_Keepalive_RetryCount: db ;Counts how many times a transaction has been retried when a transaction fails due to a bad keepalive
+
+;These local variables for ActionPrintAll exist because pushing/popping after each print makes register handling and conditionals more complicated.
+PrintAll_PictureCounter: db ;local variable that holds the ID of the current photo to print. Always starts at 0. Iterates through photo IDs $00-$1D
+PrintAll_ToPrint: db ;local variable that holds the number of photos to print
+
+
+
 ActionPrintAll::
   di
   ;Use the state vector to figure out which photos are in which slot
@@ -105,11 +162,6 @@ ActionPrintAll::
   ldh [rIF],a
 reti
 
-;These local variables for ActionPrintAll exist because pushing/popping after each print makes register handling and conditionals more complicated.
-PrintAll_PictureCounter: db ;local variable that holds the ID of the current photo to print. Always starts at 0. Iterates through photo IDs $00-$1D
-PrintAll_ToPrint: db ;local variable that holds the number of photos to print
-
-
 /**
 * Prints the photo in the active photo slot
 */
@@ -132,7 +184,8 @@ SendTransaction_PrintPhoto_NoFrame:
 
   xor a
   ld [InTransaction_StepNumber],a ;Step 0, send init packet
-  ;TODO: clear buffer with an Init packet before sending packet
+  ;Clear buffer with an Init packet before sending packet.
+  ;TODO: Call this AFTER after a photo instead of before, then only call this at the beginning if the "unprocessed data" status bit is set in the response to the initial status packet?
   push hl
   call SendPacket_Init
   ld d,h
@@ -148,7 +201,7 @@ SendTransaction_PrintPhoto_NoFrame:
   and a,%11110001 ;ignore unprocessed data, image data full, currently printing statuses, and checksum
   ret nz ;if z, all is good. Else return early.
 
-  ;TODO: Send status until "unprocessed data" flag is unset, waiting a bit between packets
+  ;TODO: Send status until "unprocessed data" flag is unset, waiting a bit between packets. We do this because the buffer may not clear immediately.
 
 
 
@@ -175,10 +228,8 @@ SendTransaction_PrintPhoto_NoFrame:
   ld a,$02 ; Step 2: send empty data packet before printing
   ld [InTransaction_StepNumber],a
   call SendPacket_EmptyData
-  ld d,h
-  ld e,l
 
-  ;Error checking: if d is not zero, return and pass it up to the display function.
+  /*  ;Error checking: if d is not zero, return and pass it up to the display function.
   ld a,d
   and a
   ret nz ;if keepalive response is wrong, exit early
@@ -187,7 +238,29 @@ SendTransaction_PrintPhoto_NoFrame:
   ld a,e
   and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
   ret nz ;if z, all is good. Else return early.
-
+  */
+  ; Error checking: 
+  ; If packet keepalive error, checksum error, or status error, return that error in b as-is.
+  ; Construct temporary Transaction Error bitfield.
+  ; Optimization Note: At the time of writing, Packet Error values are a subset of Transaction Error values -- They can be returned as-is
+  ; The following check for packet errors can be replaced by "ld a,b / and a / ret nz"
+  ; The below code works even if the values of the types change.
+  xor a
+  bit PACKET_ERR_BIT_STATUS,b
+  jr z,:+
+    set TRANSACTION_ERR_BIT_STATUS,a
+  :bit PACKET_ERR_BIT_CHECKSUM,b
+  jr z,:+
+    set TRANSACTION_ERR_BIT_CHECKSUM,a
+  :bit PACKET_ERR_BIT_KEEPALIVE,b
+  jr z,:+
+    set TRANSACTION_ERR_BIT_KEEPALIVE,a
+  :
+  and a, a ; If temporary Transaction Error bitfield is non-empty, we should return these errors.
+  jr z,:+
+    ld b,a ; Load temporary Transaction Error bitfield into return register b and return
+    ret
+  : ;End check for packet errors
 
   ld a,$03 ; Step 3: send print packet.
   ld [InTransaction_StepNumber],a
@@ -206,65 +279,65 @@ SendTransaction_PrintPhoto_NoFrame:
   ld a,$04 ; Step 4: Loop wait for printer start
   ld [InTransaction_StepNumber],a
   .waitForPrintStart
-  ;TODO easy out without timeout: if user presses B, return
+    ;TODO easy out without timeout: if user presses B, return
 
-  ;Wait for print command to start, with timeout of ?how many? tries
-  call SendTransaction_DetectPrinter ;this returns its results in hl instead of de. 
-  ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
-  ld e,l
-  
-  ;Error checking: if d is not zero, return and pass it up to the display function.
-  ld a,d
-  and a
-  ret nz ;if keepalive response is wrong, exit early
-  ;Error checking: if e is not what is expected, return and pass it up to the display function.
-  ld a,e
-  and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
-  ret nz ;if z, all is good. Else return early.
+    ;Wait for print command to start, with timeout of ?how many? tries
+    call SendPacket_DetectPrinter ;this returns its results in hl instead of de. 
+    ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
+    ld e,l
+    
+    ;Error checking: if d is not zero, return and pass it up to the display function.
+    ld a,d
+    and a
+    ret nz ;if keepalive response is wrong, exit early
+    ;Error checking: if e is not what is expected, return and pass it up to the display function.
+    ld a,e
+    and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
+    ret nz ;if z, all is good. Else return early.
 
-  ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
-  ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
-  ;or should we skip the check for printing START and check only for printing STOPPED (bit 1 unset, bit 3 unset)
-  ;The very fast Pico Printer might shut off the "currently printing" flag before we get a chance to read it, leading to an infinite loop of waiting for print to start when it already has.
-  bit 1,e
-  ;if not printing, loop until it is
-  ;TODO: Add a WAIT_FOR_PRINT_START timeout
+    ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
+    ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
+    ;or should we skip the check for printing START and check only for printing STOPPED (bit 1 unset, bit 3 unset)
+    ;The very fast Pico Printer might shut off the "currently printing" flag before we get a chance to read it, leading to an infinite loop of waiting for print to start when it already has.
+    bit 1,e
+    ;if not printing, loop until it is
+    ;TODO: Add a WAIT_FOR_PRINT_START timeout
   jr z,.waitForPrintStart
 
   ld a,$05 ; Step 5: Loop wait for printer end
   ld [InTransaction_StepNumber],a
 
-.waitForPrintEnd
-  ;TODO: Easy out with no timeout: if user presses B, exit without timeout
+  .waitForPrintEnd
+    ;TODO: Easy out with no timeout: if user presses B, exit without timeout
 
-  ;Wait for print command to finish, with timeout of ?how many? seconds
-  call SendTransaction_DetectPrinter ;this returns its results in hl instead of de. 
-  ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
-  ld e,l
-  
-  ;Error checking: if d is not zero, return and pass it up to the display function.
-  ld a,d
-  and a
-  ret nz ;if keepalive response is wrong, exit early
-  ;Error checking: if e is not what is expected, return and pass it up to the display function.
-  ld a,e
-  and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
-  ret nz ;if z, all is good. Else return early.
+    ;Wait for print command to finish, with timeout of ?how many? seconds
+    call SendPacket_DetectPrinter ;this returns its results in hl instead of de. 
+    ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
+    ld e,l
+    
+    ;Error checking: if d is not zero, return and pass it up to the display function.
+    ld a,d
+    and a
+    ret nz ;if keepalive response is wrong, exit early
+    ;Error checking: if e is not what is expected, return and pass it up to the display function.
+    ld a,e
+    and a,%11110001 ;ignore unprocessed data, image data full, and currently printing statuses
+    ret nz ;if z, all is good. Else return early.
 
-  ;Wait here by displaying the photo number and step. (1 frames ~ 17ms)
-  ;Real printer seems to be getting spammed with too many packets during this waitloop, adding the debug function ALMOST  fixes it
-  ;we get to photo 8 before 0106 keepalive failed/ 0805 (on photo 8 step 5)
-  ;also error at 0183 / 0705 -- this seems to imply we still have problems occurring in step 5....
-  ; This implies to me it's a probabalistic error caused by packets being too close apart.
-  push de
-  call PrinterDebug_DisplayCurrentPrintingPhoto
-  pop de
-  ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
-  ;Wait for bit 1 unset
-  ;Todo: add timeout, if the printer somehow ends up getting "stuck" printing
-  bit 1,e
-  ;if not printing, loop until it is
-  ;TODO: Add a WAIT_FOR_PRINT_START timeout
+    ;Wait here by displaying the photo number and step. (1 frames ~ 17ms)
+    ;Real printer seems to be getting spammed with too many packets during this waitloop, adding the debug function ALMOST  fixes it
+    ;we get to photo 8 before 0106 keepalive failed/ 0805 (on photo 8 step 5)
+    ;also error at 0183 / 0705 -- this seems to imply we still have problems occurring in step 5....
+    ; This implies to me it's a probabalistic error caused by packets being too close apart.
+    push de
+    call PrinterDebug_DisplayCurrentPrintingPhoto
+    pop de
+    ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
+    ;Wait for bit 1 unset
+    ;Todo: add timeout, if the printer somehow ends up getting "stuck" printing
+    bit 1,e
+    ;if not printing, loop until it is
+    ;TODO: Add a WAIT_FOR_PRINT_START timeout
   jr nz,.waitForPrintEnd
 
   ld a,$06 ; Step 6: Wait for printer has ended
@@ -273,10 +346,17 @@ SendTransaction_PrintPhoto_NoFrame:
 ret
 
 /**
-* @return h: 0 in h if keepalive packet is $80/81
-* @return l: status byte of the last packet
+* @clobber a,b,hl 
+* @return d: keepalive packet
+* @return e: status byte of the last packet
+* @return b: Error, if any, or 0.
 */
+;TODO: Return in de instead of hl, and modify references to use new return values.
 SendPacket_EmptyData:
+  ld a,CHECKSUM_RETRIES
+  ld [Packet_Checksum_RetryCount],a ;Initialize checksum retry counter
+
+  .checkSumRetry
   call SendMagicBytes
   ld hl,EmptyDataPacket
   ld c,(EmptyDataPacket.end-EmptyDataPacket)-1
@@ -285,22 +365,72 @@ SendPacket_EmptyData:
   ld b,$00
   call SendByte_b
   ldh a,[rSB]
-  ld h,$01 ;h will b 1 if no keepalive, 0 if keepalive
-  cp a,$81
-  jr nz,:+
-    ld h,$00
-  :cp a,$80
-  jr nz,:+
-    ld h,$00
-  :;Request printer status
-  ld b,$00
+  ld d,a ; d = Keepalive packet
+  ;Request printer status
+  :ld b,$00
   call SendByte_b
   ldh a,[rSB]
-  ld l,a ;l = status byte of printer
+  ld e,a ; e = Status byte
+
+  call Packet_ErrorCheck
+  ;TODO: If Keepalive error, return without doing any further checking.
+  bit PACKET_ERR_BIT_KEEPALIVE,b
+  ret nz
+  ;If Status error, return without any further checking
+  bit PACKET_ERR_BIT_STATUS,b
+  ret nz
+  ; If no checksum error (which means there are no packet errors), return
+  bit PACKET_ERR_BIT_CHECKSUM,b
+  ret z
+
+  ;If no other errors, but checksum error, decrease checksum retry count by one.
+  ld a,[Packet_Checksum_RetryCount]
+  dec a
+  ld [Packet_Checksum_RetryCount],a
+  ;If non-zero (more retries left), retry sending packet
+  jr nz,.checkSumRetry
+  ;Default case: if no errors, return.
 ret
 EmptyDataPacket: ;Does not include keepalive or status byte
   db $04,$00,$00,$00,$04,$00
 .end
+
+/**
+* Standard function to call at the end of every packet send
+* @param d: Keepalive byte response
+* @param e: Status byte
+* @return d: Keepalive byte response (unchanged from input)
+* @return e: Status byte (unchanged from input)
+* @return b: Packet error code, or 0 for OK
+* Status system: bitfield b signals errors. Each error will set the bit in the bitfield. Multiple errors can be set at once: priority is decided by the callee.
+* @clobber a, b
+*/
+Packet_ErrorCheck:
+  ld b,PACKET_ERR_MASK_KEEPALIVE | PACKET_ERR_MASK_STATUS | PACKET_ERR_BIT_CHECKSUM
+  ;Check keepalive
+  ;TODO: We could just NOT return the keepalive to save a reg -- nothing should be using it instead of a.
+  
+  ; Keepalive check: If no keepalive error, clear the corresponding bit in the error bitfield.
+  ld a,d
+  cp a,$81
+  jr nz,:+
+    res PACKET_ERR_BIT_KEEPALIVE,b
+  :cp a,$80
+  jr nz,:+
+    res PACKET_ERR_BIT_KEEPALIVE,b
+  :
+  ;Status byte check -- If no errors in the upper bits, clear the corresponding bit in the error bitfield.
+  ld a,e ;e = status byte of printer
+  and a,%11110000 ;if any of the top 4 bits are set, status error
+  jr nz,:+
+    res PACKET_ERR_BIT_STATUS,b
+  : ; End Status byte check
+  ;Checksum error check -- If no checksum error, clear the corresponding bit in the error bitfield.
+  bit 0,e ; Checksum error check
+  jr nz,:+
+    res PACKET_ERR_BIT_CHECKSUM,b
+  : ;End checksum error check
+ret
 
 /**
 *@return h: keepalive packet -- zero if OK, 1 otherwise
@@ -340,7 +470,6 @@ InitPacket:
 * Therefore we can still pass in an h=address within the photo of the two tilelines to draw.
 * @param h: location
 * @clobber af,bc,hl,de
-* @return h: argument h plus 2.
 * @return d: result of keepalive byte from printer. Returns 0 if OK, else 1.
 * @return e: status byte of printer
 */
@@ -506,10 +635,11 @@ PointerPacketScratchSpace:
 
 
 /**
+* @clobber a,bc,hl
 * @return h: 0 in h if keepalive packet is $80/81
 * @return l: status byte of the last packet
 */
-SendTransaction_DetectPrinter:
+SendPacket_DetectPrinter:
   call SendMagicBytes
   ld hl,PrinterDetectionSequence
   ld c,(PrinterDetectionSequence.end-PrinterDetectionSequence)-1
@@ -537,7 +667,7 @@ PrinterDetectionSequence: ;Does not include keepalive or status byte
 
 ActionDetectPrinter::
   di
-  call SendTransaction_DetectPrinter
+  call SendPacket_DetectPrinter
   call PrinterDebug_DisplayResult
   xor a
   ldh [rIF],a
@@ -626,7 +756,7 @@ SendByte_b:
   ldh [rSB],a
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE | SCF_SPEED
+  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED)
   ldh [rSC],a
   ;Wait for transmission to end
   :ldh a,[rSC]
@@ -649,7 +779,7 @@ SendByte_b_checksum_de:
   ldh [rSB],a
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE | SCF_SPEED
+  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED)
   ldh [rSC],a
 
   .addChecksum

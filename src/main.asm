@@ -100,15 +100,12 @@ ENDU
                             ; to hold $0F C-values, we need $0F * 2 bytes
   SerialEnable:: db  ; This is used by printing logic to tell the serial input logic to stop. Initialized to 1. 
                     ; When 0, we should stop initiating transfers with the remote control, since these will interfere with the printer's transfers.
-  InTransaction_StepNumber:: db ;When in a printing transaction, this is set to the step number within the transaction before the packet is sent.If something goes wrong, we can display this step number for debugging.
-  PrintTransaction_Keepalive_RetryCount:: db ;When a transaction fails due to a bad keepalive, 
-  PrintPacket_Checksum_RetryCount:: db ;When a packet gets a "bad checksum" error (status bit 0), the packet should retry sending a certain number of times before giving up.
 
 
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
 
-  ;Cumulative $FD bytes
-  ;$02 bytes remaining
+  ;Cumulative $FA bytes
+  ;$05 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
