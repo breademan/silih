@@ -285,9 +285,6 @@ SendTransaction_PrintPhoto_NoFrame:
     call PacketErrorToTransactionError
     ret nz
 
-    ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
-    ld e,l
-
     ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
     ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
     ;or should we skip the check for printing START and check only for printing STOPPED (bit 1 unset, bit 3 unset)
@@ -307,9 +304,6 @@ SendTransaction_PrintPhoto_NoFrame:
     call SendPacket_DetectPrinter ;this returns its results in hl instead of de. 
     call PacketErrorToTransactionError
     ret nz
-
-    ld d,h   ;For compatability with the rest of the return values in this function, put the results in de
-    ld e,l
 
     ;Wait here by displaying the photo number and step. (1 frames ~ 17ms)
     ;Real printer seems to be getting spammed with too many packets during this waitloop, adding the debug function ALMOST  fixes it
