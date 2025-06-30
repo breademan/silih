@@ -28,6 +28,7 @@ DEF TRANSACTION_RET_OK EQU $00
 DEF TRANSACTION_ERR_MASK_CHECKSUM EQU %00000001 << TRANSACTION_ERR_BIT_CHECKSUM
 DEF TRANSACTION_ERR_MASK_KEEPALIVE EQU %00000001 << TRANSACTION_ERR_BIT_KEEPALIVE
 DEF TRANSACTION_ERR_MASK_STATUS EQU %00000001 << TRANSACTION_ERR_BIT_STATUS
+DEF TRANSACTION_ERR_MASK_STEP_TIMEOUT EQU %00000001 << TRANSACTION_ERR_BIT_STATUS
 
 ; Errors returned by a transaction set.
 DEF ACTION_ERR_BIT_KEEPALIVE EQU 7
@@ -79,7 +80,8 @@ Packet_Checksum_RetryCount: db ;When a packet gets a "bad checksum" error (statu
 ;In a transaction, this is set to the step number within the transaction before the packet is sent.If something goes wrong, we can display this step number for debugging.
 InTransaction_StepNumber: db 
 ;When sending a conditional loop of packets, such as when waiting for printing to start/finish, waiting for buffer to clear, etc, this is used to prevent infinite loops using a timeout.
-Transaction_StepTimeoutCounter: db
+;Little endian. The lowest-address byte is the least-significant.
+Transaction_StepTimeoutCounter_lilE: dw
 ;Action local vars
 Transaction_Keepalive_RetryCount: db ;Counts how many times a transaction has been retried when a transaction fails due to a bad keepalive
 
@@ -231,6 +233,7 @@ reti
 * @arg h: HIGH address of image data, either A0 or B0
 * @return d: 0 in d if keepalive packet is $80/81
 * @return e: status byte of the last packet
+* @return b: TransactionError bitfield.
 */
 SendTransaction_PrintPhoto_NoFrame:
   ;TODO: Ensure printer is connected by getting printer status.
@@ -275,16 +278,26 @@ SendTransaction_PrintPhoto_NoFrame:
   call PacketErrorToTransactionError
   ret nz
 
+  .waitForPrintStart_Init
   ld a,$04 ; Step 4: Loop wait for printer start
   ld [InTransaction_StepNumber],a
-  .waitForPrintStart
+
+  DEF PRINTSTART_MAX_POLLS EQU $00FF
+  ld a,LOW(PRINTSTART_MAX_POLLS)
+  ld [Transaction_StepTimeoutCounter_lilE],a ;Load LSB of step timeout counter.
+  ld a,HIGH(PRINTSTART_MAX_POLLS)
+  ld [Transaction_StepTimeoutCounter_lilE+1],a ;Load MSB of step timeout counter. -- $FF should be about 255/60 (4.25) seconds 
+  .waitForPrintStart_Loop
     ;TODO easy out without timeout: if user presses B, return
 
     ;Wait for print command to start, with timeout of ?how many? tries
-    call SendPacket_DetectPrinter ;this returns its results in hl instead of de. 
+    call SendPacket_DetectPrinter
     call PacketErrorToTransactionError
     ret nz
 
+    push de
+    call PrinterDebug_DisplayCurrentPrintingPhoto
+    pop de
     ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
     ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
     ;or should we skip the check for printing START and check only for printing STOPPED (bit 1 unset, bit 3 unset)
@@ -292,12 +305,39 @@ SendTransaction_PrintPhoto_NoFrame:
     bit 1,e
     ;if not printing, loop until it is
     ;TODO: Add a WAIT_FOR_PRINT_START timeout
-  jr z,.waitForPrintStart
+  jr nz,.waitForPrintStart_End ;if no error and Printing flag is set, finish the waitloop.
+  ;TODO decrement Transaction_StepTimeoutCounter and loop if it's non-zero.
+  ld hl,Transaction_StepTimeoutCounter_lilE ;3c3b
+  ld a,[hli] ;2c1b
+  ld h,[hl] ;2c1b
+  ld l,a ;Load timeoutcounter into hl ;1c1b
 
+  dec hl
+  
+  ;Write back decremented timeout counter
+  ld a,l ;load l into base address
+  ld [Transaction_StepTimeoutCounter_lilE],a
+  ld a,h ;ld h into +1
+  ld [Transaction_StepTimeoutCounter_lilE+1],a
+
+  ;test if hl==0
+  xor a
+  cp a,h
+  jr nz,.waitForPrintStart_Loop     ;if high(counter) is nz, loop.
+  xor a ;if high is zero, check whether low is zero.
+  cp a,l
+  jr nz,.waitForPrintStart_Loop
+  ;TODO If both high and low are zero, break the loop and throw a Step Timeout transaction error as we've reached timeout.
+  ld b,TRANSACTION_ERR_MASK_STEP_TIMEOUT
+  ret
+
+  .waitForPrintStart_End
+
+  .waitForPrintEnd_Init
   ld a,INTRANSACTION_STEP_PRINTPHOTO_WAITPRINTFINISH ; Step 5: Loop wait for printer end
   ld [InTransaction_StepNumber],a
 
-  .waitForPrintEnd
+  .waitForPrintEnd_Loop
     ;TODO: Easy out with no timeout: if user presses B, exit without timeout
 
     ;Wait for print command to finish, with timeout of ?how many? seconds
@@ -319,7 +359,7 @@ SendTransaction_PrintPhoto_NoFrame:
     bit 1,e
     ;if not printing, loop until it is
     ;TODO: Add a WAIT_FOR_PRINT_START timeout
-  jr nz,.waitForPrintEnd
+  jr nz,.waitForPrintEnd_Loop
 
   ld a,$06 ; Step 6: Wait for printer has ended
   ld [InTransaction_StepNumber],a
@@ -605,8 +645,8 @@ PointerPacketScratchSpace:
 * Sends a packet that requests printer status.
 * Used to detect whether a functioning printer is connected.
 * @clobber a,bc,hl
-* @return h: 0 in h if keepalive packet is $80/81
-* @return l: status byte of the last packet
+* @return d: value of keepalive response
+* @return e: status byte of the last packet
 */
 SendPacket_DetectPrinter:
   xor a
@@ -915,6 +955,162 @@ PacketErrorToTransactionError:
   ld b,a
   and a, a
 ret
+
+
+
+
+;---------------------------Transfer Functions-------------------------------
+/**
+* Sends a group of packets to the printer to print a single photo with no frame with the transfer protocol.
+* Prior to calling this, ensure no captures are running and switch to the appropriate SRAM bank for the photo.
+* @arg h: HIGH address of image data, either A0 or B0
+* @return d: 0 in d if keepalive packet is $80/81
+* @return e: status byte of the last packet
+*/
+SendTransaction_TransferPhoto:
+  ; Don't check for Printer presence?
+  xor a
+  ld [InTransaction_StepNumber],a ;Step 0, send init packet
+  ;Clear buffer with an Init packet before sending packet.
+  push hl ; Push and pop the pointer to our image data.
+  call SendPacket_Init
+  pop hl
+  ;Don't handle errors
+
+  ;Only send one giant data packet of 3584 bytes (16x14 tiles)
+  ;(According to the Photo! readme)
+  ld a,$01
+  ld [InTransaction_StepNumber],a ;Step 1, send all lines
+  call SendPacket_TransferData
+  ;Don't error check
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+
+  ld a,$03 ; Step 3: Data packet send has ended
+  ld [InTransaction_StepNumber],a
+ret
+
+
+/*
+*@param h: HIGH address of image data, either A0 or B0
+*@return none: we don't do error checking.
+*/
+SendPacket_TransferData:
+
+
+  call SendMagicBytes
+  ld de,$00 ;initialize checksum
+  ld b,PRINTER_CMD_TRANSFER
+  call SendByte_b ;Send command
+  ld b,PRINTER_COMPRESSION_OFF
+  call SendByte_b
+  ;Length of packet is 128x112x2bpp/8bitsperbyte = decimal 3584 or $E000
+  ld b,$00 ;send low byte of length
+  call SendByte_b
+  ld b,$0E ;send high byte of length
+  call SendByte_b
+
+  REPT $10
+  call SendPacketFragment_OneLine_Transfer
+  ENDR
+  ;Checksum is zero
+  ld b,00
+  call SendByte_b
+  ld b,00
+  call SendByte_b
+  ;Send keepalive byte
+  ld b,$00
+  call SendByte_b
+  ldh a,[rSB]
+  ;Request printer status
+  ld b,$00
+  call SendByte_b
+  ldh a,[rSB]
+ret
+
+/**
+* Sends one line of tiles in the Transfer Data packet format (16 tiles)
+*@param h: high byte of the line of 16 tiles to send
+*@return hl: original address plus $100 (one line of Game Boy Camera tiles)
+*/
+SendPacketFragment_OneLine_Transfer:
+  ;Send first line of 16 image tiles -- $100 bytes
+  ld l,$00
+  ld c,$FF
+  call SendMulti_hl_c
+ret
+
+ActionTransferAll::
+  di
+
+  ;TODO Use the state vector to figure out which photos are in which slot
+  ld a,30 ;Initialize picture counter -- TODO: Set it to however many pictures you actually have in active slots
+  ld [PrintAll_ToPrint],a ;TODO: replace this too
+  
+  ld a,[PrintAll_ToPrint]
+  and a
+  jr z,.allPhotosFinished ;if number of photos to print, determined by the state vector, is 0, finish up early.
+
+  xor a
+  ld [PrintAll_PictureCounter],a ;Initialize photo counter to 0
+
+.printPhotoLoop
+
+  ;Set hl and rRAMB to point to our photo. hl = $A000 if ID is even, $B000 if odd
+  ld a,[PrintAll_PictureCounter]  ;TODO: We're not looking at an even-or-odd image NUMBER 
+                                  ;(which tells you nothing about the address without looking up which slot it takes up in the SV)
+                                  ;but for an even or odd image SLOT
+                                  ;Therefore, after loading the PictureCounter, we should call a function that returns which slot the photo number is located in
+                                  ;return it in register a
+                                  ;For testing, just ignore active/inactive values and pretend the slot number IS the photo number, so just print slots in order
+  ld hl,$A000 ;Set hl to $A000 if even (default case)
+  bit 0,a
+  jr z,.evenSlotID ;if SLOT number is even, address starts at $A0, else $B0
+    ld h,$B0 ;slot number is odd, location is B0
+  .evenSlotID
+
+  ;with a=slot ID of photo,
+  srl a ;a = SlotID >> 1
+  inc a ;a =(SlotID>>1)+1
+  ld [rRAMB], a ;switch SRAM bank to the appropriate SRAM bank
+
+  call SendTransaction_TransferPhoto
+
+  .printPhotoLoopCondition ; Increments the Picture counter and determines whether to continue looping.
+  ;Display to user: printing photo and step within the sendtransaction without asking for input
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+
+  ;Increment PictureCounter, then finish when it is equal to the number of photos to print
+    ;Don't touch de (return value from the photo print) -- hl is OK, since our next photo has a very different address anyway.
+    ld a,[PrintAll_PictureCounter]
+    inc a 
+    ld [PrintAll_PictureCounter],a ;increment counter and store it back
+    ld b,a ;store counter in b
+    ld a,[PrintAll_ToPrint]
+    cp a,b ;cp ToPrint, (ID of next photo to print)
+    jr z,.allPhotosFinished ;if all photos are finished printing, finish.
+  
+  ;If no errors and loop not finished, jump back to the beginning.
+  jr .printPhotoLoop
+
+
+  .generalError
+  .allPhotosFinished
+  push af
+  push bc
+  push de
+  push hl
+  call PrinterDebug_DisplayCurrentPrintingPhoto
+  pop hl
+  pop de
+  pop bc
+  pop af
+
+  ld h,d
+  ld l,e
+  call PrinterDebug_DisplayResult
+  xor a
+  ldh [rIF],a
+reti
 
 
 ENDL
