@@ -491,8 +491,8 @@ cp a,$A0
 jr nz,:-
 
 
-;TODO: put this table somewhere else to avoid needless jr instruction
-jr :+
+;TODO: put this table somewhere else to avoid needless jp instruction
+jp :+
 SETTINGS_STRINGS_TABLE:
 
 MACRO X

@@ -6,7 +6,7 @@ DEF TEST_CALLEE_RAMBANK EQU 4
 DEF BACKUP_BANK EQU 6 ; Also stores the alternative payload for the loader, so don't set it to 7, as the location corresponding to bank 7 won't fit in 32K ROM space.
 DEF GRAPHICS_BANK EQU 2
 DEF PRINTER_RAMBANK EQU 5
-;DEF SAVE_RAMBANK EQU 2
+DEF SAVE_RAMBANK EQU 0 ; Currently the save RAMbank is held in unbanked WRAM. This may change.
 ;DEF INIT_RAMBANK EQU 2
 DEF JOYPAD_DOWN EQU 7
 DEF JOYPAD_UP EQU 6
@@ -152,7 +152,7 @@ ENDC
 DEF NUM_OBJ_PALETTES EQU 2
 DEF NUM_BG_PALETTES EQU 3
 
-DEF NUM_SETTINGS EQU 10
+DEF NUM_SETTINGS EQU 11
 DEF NULL EQU 00
 
 DEF TAKE_ACTION_SAVE EQU 0

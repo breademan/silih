@@ -834,6 +834,7 @@ ret
 * @param e: WRAM bank to switch to
 * @param hl: address of callee
 * @clobber a,bc, and whatever the function it calls clobbers.
+* @return d: (optional) callee may use this as a return register.
 */
 Trampoline_hl_e::
   ldh a,[rSVBK]

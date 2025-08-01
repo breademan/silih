@@ -20,10 +20,9 @@ DEF CHECKSUM_XOR_ADDR_ECHO EQU $A000+$11FB
 ;Writes a byte to the state vector located in $11B2-CF
 ;Updates the checksums in $11D5 (sum) and $11D6 (xor)
 ; Updating the backup echo checksums requires we do all this over again or it will be buggy-- just copy the vector wholesale at the end of each multi-byte_transaction.
-;Args   a = value of new byte
-;       hl = address of byte to change
-;clobbers a, b, de, so we may need to pop/push register state beforehand
-;push/pops make it only clobber af
+;@param a:  value of new byte
+;@param hl: address of byte to change
+;@clobber: a (hl/de/bc preserved)
 StateVector_WriteByte:
 ;d = new byte value
 ;e = old byte value
@@ -190,15 +189,13 @@ StateVector_Backup::
   ;Assumes there are no missing display numbers, as this should be done at init or on delete.
   ;clobber hl,a,c,de
 StateVector_FindAndFillFreeSlot::
-  ld hl,STATEVECTOR_START_ADDR
-  :ld a,[hli]
-  inc a
-  jr z, .found ;if a == FF
-  ld a,l
-  cp a,LOW(STATEVECTOR_LAST_ADDR)+1
-  jp nz,:-
-  ld a,$00
-  ret   ;if l==lastelement+1,
+  ld d,$FF
+  call StateVector_GetImageSlot ;Search StateVector for Gallery Number FF (Free slot)
+  ld a,d
+  inc a ;if d==FF, no free slots were found and we should return $00 without touching the State Vector. If z, $FF was not found in the SV.
+  jr nz, .found ; If $FF was found in the SV
+  ld a,$00 ;If $FF was not found in the SV, return 0.
+  ret
   .found
   ld a, l
   sub a,LOW(STATEVECTOR_START_ADDR)
@@ -234,3 +231,25 @@ StateVector_DeleteAll::
   jr nz,:- ;2b
   call StateVector_Backup
 ret
+
+; Can be safely called as a trampoline function
+; @param d: Gallery Number to find the slot for.
+; @clobber a,hl,d
+; @return d: Slot number that contains the given Gallery Number. If no slot number is found, returns $FF.
+; @return hl: Address in StateVector that contains the Gallery Number, plus one. Only valid if d!=$FF. Used for StateVector_FindAndFillFreeSlot.
+StateVector_GetImageSlot::
+  	ld hl,STATEVECTOR_START_ADDR
+	  :ld a,[hli]
+	  cp a,d ;is [hl-1] == target Gallery Number
+	  jr z, .found ;if a == target Gallery number
+	  ld a,l
+	  cp a,LOW(STATEVECTOR_LAST_ADDR)+1
+	  jp nz,:-
+			ld d,$FF
+			ret   ;if nextelement==lastelement+1,
+	  .found
+		ld a, l
+		sub a,LOW(STATEVECTOR_START_ADDR)
+		dec a ; return the element that you found in d.
+    ld d,a
+		ret

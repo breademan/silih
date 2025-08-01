@@ -1476,7 +1476,16 @@ Init_PrintAll:
   ld e, PRINTER_RAMBANK ;bank which the callee is in
   call Trampoline_hl_e
 
-  ;ld hl, ActionPrintAll ; addr of the callee
+  ld hl, ActionPrintAll ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+ret
+
+Init_TransferAll:
+  ld hl, ActionDetectPrinter ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+
   ld hl, ActionTransferAll ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
   call Trampoline_hl_e

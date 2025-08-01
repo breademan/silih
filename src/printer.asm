@@ -51,6 +51,7 @@ DEF INTRANSACTION_STEP_PRINTPHOTO_WAITPRINTFINISH EQU 5
 ; @param b: Packet error type
 ; @return b: Packet error type
 ; @clobber a,b
+;Cycle count is "worst-case" (no errors). If there's an error, this can take as few as 7/11/15 cycles. It can also jump back to .checkSumRetry.
 MACRO PACKET_ERROR_POST
   ; If Keepalive error, return without doing any further checking.
   bit PACKET_ERR_BIT_KEEPALIVE,b
@@ -63,11 +64,11 @@ MACRO PACKET_ERROR_POST
   ret z
 
   ; If no other errors, but checksum error, decrease checksum retry count by one.
-  ld a,[Packet_Checksum_RetryCount]
-  dec a
-  ld [Packet_Checksum_RetryCount],a
+  ld a,[Packet_Checksum_RetryCount] ;4c
+  dec a ;1c
+  ld [Packet_Checksum_RetryCount],a ;4c
   ; If non-zero (more retries left), retry sending packet
-  jr nz,.checkSumRetry
+  jr nz,.checkSumRetry ;3/2 cycles
   ;Default case: if no errors, return.
 ENDM
 
@@ -111,6 +112,9 @@ ActionPrintAll::
   ld a,KEEPALIVE_MAX_RETRIES
   ld [Transaction_Keepalive_RetryCount],a
   .retryPrintPhoto
+  xor a
+  ld [rRAMB],a ;Switch to SRAM bank that holds State Vector
+
   ;Set hl and rRAMB to point to our photo. hl = $A000 if ID is even, $B000 if odd
   ld a,[PrintAll_PictureCounter]  ;TODO: We're not looking at an even-or-odd image NUMBER 
                                   ;(which tells you nothing about the address without looking up which slot it takes up in the SV)
@@ -118,6 +122,16 @@ ActionPrintAll::
                                   ;Therefore, after loading the PictureCounter, we should call a function that returns which slot the photo number is located in
                                   ;return it in register a
                                   ;For testing, just ignore active/inactive values and pretend the slot number IS the photo number, so just print slots in order
+  ld d,a
+  ld hl,StateVector_GetImageSlot
+  ld e,SAVE_RAMBANK
+  call Trampoline_hl_e
+
+  ;Check whether d==FF If it is, skip to .printPhotoLoopCondition
+  ld a,d
+  cp a,$FF
+  jr z,.printPhotoLoopCondition
+
   ld hl,$A000 ;Set hl to $A000 if even (default case)
   bit 0,a
   jr z,.evenSlotID ;if SLOT number is even, address starts at $A0, else $B0
@@ -412,29 +426,29 @@ EmptyDataPacket: ;Does not include keepalive or status byte
 * @clobber a, b
 */
 Packet_ErrorCheck:
-  ld b,PACKET_ERR_MASK_KEEPALIVE | PACKET_ERR_MASK_STATUS | PACKET_ERR_BIT_CHECKSUM
+  ld b,PACKET_ERR_MASK_KEEPALIVE | PACKET_ERR_MASK_STATUS | PACKET_ERR_BIT_CHECKSUM ;2c
   ;Check keepalive
   ;TODO: We could just NOT return the keepalive to save a reg -- nothing should be using it instead of a.
   
   ; Keepalive check: If no keepalive error, clear the corresponding bit in the error bitfield.
-  ld a,d
-  cp a,$81
-  jr nz,:+
-    res PACKET_ERR_BIT_KEEPALIVE,b
-  :cp a,$80
-  jr nz,:+
-    res PACKET_ERR_BIT_KEEPALIVE,b
+  ld a,d ;1c
+  cp a,$81 ;2c
+  jr nz,:+ ;3/2c
+    res PACKET_ERR_BIT_KEEPALIVE,b ;2c
+  :cp a,$80 ;2c
+  jr nz,:+ ;3/2c
+    res PACKET_ERR_BIT_KEEPALIVE,b ;2c
   :
   ;Status byte check -- If no errors in the upper bits, clear the corresponding bit in the error bitfield.
-  ld a,e ;e = status byte of printer
-  and a,%11110000 ;if any of the top 4 bits are set, status error
-  jr nz,:+
-    res PACKET_ERR_BIT_STATUS,b
+  ld a,e ;e = status byte of printer ;1c
+  and a,%11110000 ;if any of the top 4 bits are set, status error ;2c
+  jr nz,:+ ;3/2c
+    res PACKET_ERR_BIT_STATUS,b ;2c
   : ; End Status byte check
   ;Checksum error check -- If no checksum error, clear the corresponding bit in the error bitfield.
-  bit 0,e ; Checksum error check
-  jr nz,:+
-    res PACKET_ERR_BIT_CHECKSUM,b
+  bit 0,e ; Checksum error check ;2c
+  jr nz,:+ ;3/2c
+    res PACKET_ERR_BIT_CHECKSUM,b ;2c
   : ;End checksum error check
 ret
 
@@ -445,24 +459,24 @@ ret
 ;@clobber a,bc,hl
 */
 SendPacket_Init:
-  xor a
-  ld [Packet_Checksum_RetryCount],a
+  xor a ;1c
+  ld [Packet_Checksum_RetryCount],a ;4c
 
   .checkSumRetry
-  call SendMagicBytes
-  ld hl,InitPacket
-  ld c,(InitPacket.end-InitPacket)-1
+  call SendMagicBytes 
+  ld hl,InitPacket ;3c
+  ld c,(InitPacket.end-InitPacket)-1 ;2c
   call SendMulti_hl_c
   ;Send keepalive byte
-  ld b,$00
+  ld b,$00 ;2c
   call SendByte_b
-  ldh a,[rSB]
-  ld d,a
+  ldh a,[rSB] ;3c
+  ld d,a ;1c
   ;Request printer status
-  ld b,$00
+  ld b,$00 ;2c
   call SendByte_b
-  ldh a,[rSB]
-  ld e,a ;e = status byte of printer
+  ldh a,[rSB] ;3c
+  ld e,a ;e = status byte of printer ;1c
   call Packet_ErrorCheck
   PACKET_ERROR_POST
 ret
@@ -758,19 +772,19 @@ ret
 * Waits after the byte is sent
 */
 SendByte_b:
-  : ldh a,[rSC]  ; Make sure nothing is being transmitted
-    bit 7, a
-  jr nz,:-
-  ld a,b ;load data into rSB
-  ldh [rSB],a
+  : ldh a,[rSC]  ; Make sure nothing is being transmitted ;3c
+    bit 7, a ;2c
+  jr nz,:- ;2c untaken, 3c taken
+  ld a,b ;load data into rSB ;1c
+  ldh [rSB],a ;3c
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED)
-  ldh [rSC],a
+  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED) ;2c
+  ldh [rSC],a ;3c
   ;Wait for transmission to end
-  :ldh a,[rSC]
-  bit 7,a
-  jr nz,:-
+  :ldh a,[rSC] ;3c
+  bit 7,a ;3c
+  jr nz,:- ;2c untaken, 3c taken
 ret
 
 /**
@@ -814,12 +828,12 @@ ret
 * @clobber a,bc,hl
 */
 SendMulti_hl_c:
-  inc c
-  : ld a,[hli]
-    ld b,a
+  inc c ;1c
+  : ld a,[hli] ;2c
+    ld b,a ;1c
     call SendByte_b
-    dec c
-  jr nz,:-
+    dec c ;1c
+  jr nz,:- ;3/2 cycles
 ret
 
 /**
@@ -969,24 +983,24 @@ ret
 */
 SendTransaction_TransferPhoto:
   ; Don't check for Printer presence?
-  xor a
-  ld [InTransaction_StepNumber],a ;Step 0, send init packet
+  xor a ;1c 
+  ld [InTransaction_StepNumber],a ;Step 0, send init packet ;4c
   ;Clear buffer with an Init packet before sending packet.
-  push hl ; Push and pop the pointer to our image data.
+  push hl ; Push and pop the pointer to our image data. ;4c
   call SendPacket_Init
-  pop hl
+  pop hl ;3c
   ;Don't handle errors
 
   ;Only send one giant data packet of 3584 bytes (16x14 tiles)
   ;(According to the Photo! readme)
-  ld a,$01
-  ld [InTransaction_StepNumber],a ;Step 1, send all lines
+  ld a,$01 ;2c
+  ld [InTransaction_StepNumber],a ;Step 1, send all lines ;4c
   call SendPacket_TransferData
   ;Don't error check
   call PrinterDebug_DisplayCurrentPrintingPhoto
 
-  ld a,$03 ; Step 3: Data packet send has ended
-  ld [InTransaction_StepNumber],a
+  ld a,$03 ; Step 3: Data packet send has ended ;2c
+  ld [InTransaction_StepNumber],a ;4c
 ret
 
 
@@ -1034,8 +1048,8 @@ ret
 */
 SendPacketFragment_OneLine_Transfer:
   ;Send first line of 16 image tiles -- $100 bytes
-  ld l,$00
-  ld c,$FF
+  ld l,$00 ;2c2b
+  ld c,$FF ;2c2b
   call SendMulti_hl_c
 ret
 
@@ -1043,8 +1057,8 @@ ActionTransferAll::
   di
 
   ;TODO Use the state vector to figure out which photos are in which slot
-  ld a,30 ;Initialize picture counter -- TODO: Set it to however many pictures you actually have in active slots
-  ld [PrintAll_ToPrint],a ;TODO: replace this too
+  ld a,30 ;Initialize picture counter -- TODO: Set it to 1+ (print/transfer range max - min)
+  ld [PrintAll_ToPrint],a
   
   ld a,[PrintAll_ToPrint]
   and a
@@ -1054,15 +1068,26 @@ ActionTransferAll::
   ld [PrintAll_PictureCounter],a ;Initialize photo counter to 0
 
 .printPhotoLoop
+  ;get Slot Number from PictureCounter -- in this case, PictureCounter represents the Gallery Number
+  ;Switch to SRAM bank that holds State Vector
+  xor a
+  ld [rRAMB],a
 
   ;Set hl and rRAMB to point to our photo. hl = $A000 if ID is even, $B000 if odd
-  ld a,[PrintAll_PictureCounter]  ;TODO: We're not looking at an even-or-odd image NUMBER 
-                                  ;(which tells you nothing about the address without looking up which slot it takes up in the SV)
-                                  ;but for an even or odd image SLOT
-                                  ;Therefore, after loading the PictureCounter, we should call a function that returns which slot the photo number is located in
-                                  ;return it in register a
-                                  ;For testing, just ignore active/inactive values and pretend the slot number IS the photo number, so just print slots in order
-  ld hl,$A000 ;Set hl to $A000 if even (default case)
+  ld a,[PrintAll_PictureCounter]
+  ;Trampoline-call StateVector_GetImageSlot, which returns the slot number in d.
+  ld d,a ; argument d is the Gallery Number to find
+  ld hl, StateVector_GetImageSlot
+  ld e, SAVE_RAMBANK; WRAM bank which contains the callee.
+  call Trampoline_hl_e
+  
+  ;Check whether d==FF. If it is, skip to .printPhotoLoopCondition without actually printing the image.
+  ld a,d
+  cp a,$FF
+  jr z,.printPhotoLoopCondition ;if d==$FF, jump to the loop condition without transferring the photo.
+  ;If the returned value was a valid slot number, print it.
+
+  ld hl,$A000 ;Set hl to $A000 if slot number is even (default case)
   bit 0,a
   jr z,.evenSlotID ;if SLOT number is even, address starts at $A0, else $B0
     ld h,$B0 ;slot number is odd, location is B0
