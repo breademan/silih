@@ -777,9 +777,8 @@ SendByte_b:
   jr nz,:- ;2c untaken, 3c taken
   ld a,b ;load data into rSB ;1c
   ldh [rSB],a ;3c
-  ;start transmission at normal speed
-  ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED) ;2c
+  PatchCode_PrintSpeed_Location1: ;The second byte of the following instruction may be patchd to enable/disable fast printing
+  ld a, SCF_START | SCF_SOURCE | SCF_SPEED ;2c
   ldh [rSC],a ;3c
   ;Wait for transmission to end
   :ldh a,[rSC] ;3c
@@ -790,8 +789,9 @@ ret
 /**
 * Sends a byte over serial, and adds it to the running checksum de
 * @param b: byte to send over serial
-* @param de: checksum (big endian) to send 
+* @param de: checksum (big endian) before current byte is included
 * @clobber a
+* @return de: new checksum (big endian) after current byte is included
 * Waits after the byte is sent
 */
 SendByte_b_checksum_de:
@@ -802,7 +802,8 @@ SendByte_b_checksum_de:
   ldh [rSB],a
   ;start transmission at normal speed
   ;TODO: decide between normal and high speed later
-  ld a, SCF_START | SCF_SOURCE | (SCF_SPEED * PRINT_HISPEED)
+  PatchCode_PrintSpeed_Location2: ;The second byte of the following instruction may be patchd to enable/disable fast printing
+  ld a, SCF_START | SCF_SOURCE | SCF_SPEED
   ldh [rSC],a
 
   .addChecksum
@@ -1137,5 +1138,22 @@ ActionTransferAll::
   ldh [rIF],a
 reti
 
+
+/* Patches the sections of code which puts a value in SC for printing. If fast printing is enabled, $83 is loaded in. If not, $81.
+* Assumes it's in the same WRAM bank as the code to be patched, so should be trampoline called.
+* @clobber a, b
+*/
+PatchCode_PrintSpeed::
+  ld b,SCF_START | SCF_SOURCE ; Used if Setting_Print_Speed is 0
+  ld a,[Setting_Print_Speed]
+  and a ; check whether Setting_Print_Speed is 0
+  jr z,:+;If it is, don't change b.
+    set 1,b
+  :
+  ld a,b ;a is now holding our value to write to SC to start printing.
+  ld [PatchCode_PrintSpeed_Location1+1],a ;change the n8 in a ld a,n8
+  ld [PatchCode_PrintSpeed_Location2+1],a
+
+ret
 
 ENDL

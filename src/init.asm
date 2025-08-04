@@ -88,6 +88,10 @@ InitSettings:
 
   INCLUDE "src/settings.inc"
 
+ResetPatchCode_PrintSpeed:
+ld hl, PatchCode_PrintSpeed
+ld e,PRINTER_RAMBANK
+call Trampoline_hl_e
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
 BackupBank0:

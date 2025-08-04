@@ -78,7 +78,7 @@ ENDU
   BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
-  ;7 bytes
+  ;8 bytes
   Setting_SerialRemote:: db ;When set, enables serial remote control.
   Setting_AEB_Interval:: db ;AEB shift: each AEB step either adds or subtracts previousExposure/(2 to the power of this value)
   Setting_AEB_Count:: db  ;Burst shot / AEB count: how many captures are taken if in Burst/AEB mode.
@@ -86,6 +86,7 @@ ENDU
   Setting_DelayTime:: db
   Setting_TimerEnable:: db
   Setting_OnTakeAction:: db ;OnTakeAction: determines what happens when a capture is completed and user confirms (for single shot), and when a capture is completed (in burst/AEB mode)
+  Setting_Print_Speed:: db ; Determines whether SC bit 1 (clock speed) is set when printing or transferring.
 
   ;2 bytes
   BurstShotRemainingCaptures: db
@@ -104,8 +105,8 @@ ENDU
 
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
 
-  ;Cumulative $FA bytes
-  ;$05 bytes remaining
+  ;Cumulative $FB bytes
+  ;$04 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 

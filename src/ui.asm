@@ -1471,6 +1471,16 @@ Setting_AEB_Interval_Sanitize:
   ld [hl],a ; Set Interval to 00
 ret
 
+Setting_Print_Speed_Toggle:
+  ld a,[Setting_Print_Speed]
+  xor a,$01
+  ld [Setting_Print_Speed],a
+  ;Trampoline call PatchCode_PrintSpeed
+  ld hl, PatchCode_PrintSpeed
+  ld e,PRINTER_RAMBANK
+  call Trampoline_hl_e
+ret
+
 Init_PrintAll:
   ld hl, ActionDetectPrinter ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
@@ -1538,7 +1548,7 @@ DrawSettings:
   call DrawSetting_Burst_AEB
   call DrawSetting_AEB_Count
   call DrawSetting_AEB_Interval
-
+  call DrawSetting_Print_Speed
 ret
 
 ;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
@@ -1650,6 +1660,13 @@ DrawSetting_AEB_Interval:
 
 ret
 
+DrawSetting_Print_Speed:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,6,HL
+  ld a,[Setting_Print_Speed]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
 
 ;Waits for Hblank and draws a single tileID b to tilemap location hl
 ;To interface with its callee, side effect: Returns with hl incremented if not horizontally flipped
