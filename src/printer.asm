@@ -230,17 +230,6 @@ WaitPrinterTimeout:
   pop bc
 ret
 
-
-/**
-* Prints the photo in the active photo slot
-*/
-ActionPrintActive:
-  di
-
-  xor a
-  ldh [rIF],a
-reti
-
 /**
 * Sends a group of packets to the printer to print a single photo with no frame.
 * Prior to calling this, ensure no captures are running and switch to the appropriate SRAM bank for the photo.
@@ -658,7 +647,8 @@ PointerPacketScratchSpace:
 /**
 * Sends a packet that requests printer status.
 * Used to detect whether a functioning printer is connected.
-* @clobber a,bc,hl
+* @clobber a,bc,de,hl
+* @return b: Packet Error code
 * @return d: value of keepalive response
 * @return e: status byte of the last packet
 */
@@ -688,10 +678,12 @@ PrinterDetectionSequence: ;Does not include keepalive or status byte
   db $0F,$00,$00,$00,$0F,$00
 .end
 
+;@return d: PACKET_ERROR
 ActionDetectPrinter::
   di
   call SendPacket_DetectPrinter
-  call PrinterDebug_DisplayResult
+  ld d,b   ; Trampoline functions can only register-return in d, so move the packet error from b to d
+  ;call PrinterDebug_DisplayResult
   xor a
   ldh [rIF],a
 reti
@@ -881,7 +873,7 @@ SendMagicBytes:
 ret
 
 /**
-* Displays two bytes (the currently printing photo number) on the Settings screen, then waits for 16 frames and a button press.
+* Displays two bytes (the currently printing photo number) on the Settings screen.
 * Also displays the step number within the SendTransaction
 *This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
 *@clobber a,b,de,hl
@@ -927,7 +919,7 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   add a,$60
   ld [de],a
 
-  ;Wait 16 frames to display it
+ /* ;Wait 16 frames to display it
   ld b,$10
   .displayWait
   :ldh a,[rSTAT] ;Wait for HBlank
@@ -940,6 +932,7 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   jr nz,:-
   dec b
   jr nz,.displayWait
+*/
 
 ret
 

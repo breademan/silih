@@ -78,7 +78,7 @@ ENDU
   BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
-  ;8 bytes
+  ;9 bytes
   Setting_SerialRemote:: db ;When set, enables serial remote control.
   Setting_AEB_Interval:: db ;AEB shift: each AEB step either adds or subtracts previousExposure/(2 to the power of this value)
   Setting_AEB_Count:: db  ;Burst shot / AEB count: how many captures are taken if in Burst/AEB mode.
@@ -87,7 +87,7 @@ ENDU
   Setting_TimerEnable:: db
   Setting_OnTakeAction:: db ;OnTakeAction: determines what happens when a capture is completed and user confirms (for single shot), and when a capture is completed (in burst/AEB mode)
   Setting_Print_Speed:: db ; Determines whether SC bit 1 (clock speed) is set when printing or transferring.
-
+  Setting_Double_Speed:: db ; Holds whether the GBC is in single- or double-speed mode. 
   ;2 bytes
   BurstShotRemainingCaptures: db
   BurstShotCurrentCapture: db
@@ -105,8 +105,8 @@ ENDU
 
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
 
-  ;Cumulative $FB bytes
-  ;$04 bytes remaining
+  ;Cumulative $FC bytes
+  ;$03 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
@@ -2033,6 +2033,32 @@ GetAEBExposure::
   ld a,[hli] ;dereference [hl] into hl
   ld h, [hl]
   ld l,a
+ret
+
+/* Switches speed to single-speed (a=$00) or double-speed (a=$80/KEY1F_DBLSPEED).
+* @param b: Target speed. 0 is single-speed, KEY1F_DBLSPEED is double-speed. 
+* @clobber a,b
+*/
+Speed_Switch::
+  ldh a,[rKEY1] ; get current speed
+  and a,KEY1F_DBLSPEED ;check bit 7
+  cp a,b ; If current speed and target speed are the same, abort
+  ret z
+
+  ldh a,[rIE]
+  ld b,a ; Store IE in b
+  xor a
+  ldh [rIE],a ; IE = $00. If IE & IF != 0, 
+  ld a,P1F_GET_NONE
+  ldh [rP1],a; JOYP = $30. Read neither buttons nor dpad, forcing lower bits to $F (nothing held). 
+  ld a,KEY1F_PREPARE
+  ldh [rKEY1],a ; Arm speed switch.
+  stop ; Initiate speed switch
+
+  xor a
+  ldh [rIF],a   ;clear interrupt flags: VBlank handler may trigger in wrong mode if we don't do this.
+  ld a,b ; Restore interrupt state from b
+  ldh [rIE], a
 ret
 
   ;---------------------------------Save Data Functions-----------------------------------------------------

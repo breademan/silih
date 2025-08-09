@@ -634,17 +634,25 @@ InitMenuState_Settings:
   xor a
   ldh [SettingsPosition],a
   ldh [SettingsNybble],a
-  ldh [rSCX], a
-  IF (SCREEN_FLIP_V)
-  ld a,8*(32-18)
-  ENDC
-  ldh [rSCY], a
   ;move cursor to appropriate position.
   call MoveCursorSpriteToSettingsPosition
   ;set LCDC.3 to 1 (tilemap 1)
   ld a,[wLCDC]
   set 3,a
   ld [wLCDC],a
+
+  ;Wait for VBlank handler to set the appropriate bit in rLCDC.
+  :ldh a,[rLCDC]
+  bit 3,a
+  jr z,:-
+
+  xor a ; Scroll to initial position in Settings
+  ldh [rSCX], a
+  IF (SCREEN_FLIP_V)
+  ld a,8*(32-18)
+  ENDC
+  ldh [rSCY], a
+
 ret
 
 MoveCursorSpriteToSettingsPosition:
@@ -1481,6 +1489,19 @@ Setting_Print_Speed_Toggle:
   call Trampoline_hl_e
 ret
 
+Setting_Double_Speed_Toggle:
+  ld a,[Setting_Double_Speed]
+  xor a,$01
+  ld [Setting_Double_Speed],a
+  
+  ld b,$00
+  and a ;if Setting_Double_Speed is 0, pass 0 (single-speed to Speed_Switch)  
+  jr z,:+
+  ld b,KEY1F_DBLSPEED
+  :call Speed_Switch
+
+ret
+
 Init_PrintAll:
   ld hl, ActionDetectPrinter ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
@@ -1495,6 +1516,10 @@ Init_TransferAll:
   ld hl, ActionDetectPrinter ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
   call Trampoline_hl_e
+
+  ;xor a
+  ;cp a,d ;If PACKET_ERROR is non-zero, don't start transfer--printer is not connected.
+  ;ret nz
 
   ld hl, ActionTransferAll ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
@@ -1549,6 +1574,7 @@ DrawSettings:
   call DrawSetting_AEB_Count
   call DrawSetting_AEB_Interval
   call DrawSetting_Print_Speed
+  call DrawSetting_Double_Speed
 ret
 
 ;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
@@ -1663,6 +1689,14 @@ ret
 DrawSetting_Print_Speed:
   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,6,HL
   ld a,[Setting_Print_Speed]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_Double_Speed:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,7,HL
+  ld a,[Setting_Double_Speed]
   add a,CHECKBOX_TILE_ID_DIS
   ld b,a
   call DrawTileInHBlank

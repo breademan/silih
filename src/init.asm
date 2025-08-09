@@ -88,10 +88,14 @@ InitSettings:
 
   INCLUDE "src/settings.inc"
 
-ResetPatchCode_PrintSpeed:
-ld hl, PatchCode_PrintSpeed
-ld e,PRINTER_RAMBANK
-call Trampoline_hl_e
+  .resetPatchCode_PrintSpeed:
+  ld hl, PatchCode_PrintSpeed
+  ld e,PRINTER_RAMBANK
+  call Trampoline_hl_e
+
+  .resetDoubleSpeed
+  ld b,$00  ; Set speed to normal-speed. May be necessary when switching back from a double-speed handover.
+  call Speed_Switch
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
 BackupBank0:
