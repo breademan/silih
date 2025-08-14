@@ -47,6 +47,11 @@ DEF KEEPALIVE_MAX_RETRIES EQU 3
 
 DEF INTRANSACTION_STEP_PRINTPHOTO_WAITPRINTFINISH EQU 5
 
+DEF PRINTALL_DELAY_FRAMES EQU $20
+DEF PRINT_STARTLOOP_DELAY_FRAMES EQU $20
+DEF PRINT_ENDLOOP_DELAY_FRAMES EQU $20
+
+
 ; After Packet_ErrorCheck in a SendPacket_x function, call this to check the return values in b.
 ; @param b: Packet error type
 ; @return b: Packet error type
@@ -159,6 +164,9 @@ ActionPrintAll::
   .printPhotoLoopCondition ; Increments the Picture counter and determines whether to continue looping.
   ;Display to user: printing photo and step within the sendtransaction without asking for input
   call PrinterDebug_DisplayCurrentPrintingPhoto
+  
+  ld b, PRINTALL_DELAY_FRAMES
+  call Printer_Delay_b_Frames
 
   ;Increment PictureCounter, then finish when it is equal to the number of photos to print
     ;Don't touch de (return value from the photo print) -- hl is OK, since our next photo has a very different address anyway.
@@ -300,6 +308,9 @@ SendTransaction_PrintPhoto_NoFrame:
 
     push de
     call PrinterDebug_DisplayCurrentPrintingPhoto
+  
+    ld b, PRINT_STARTLOOP_DELAY_FRAMES
+    call Printer_Delay_b_Frames
     pop de
     ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
     ;TODO: Should we wait for the printer to START printing (bit 1 (printing) set, bit 3 'ready to print' unset from previous set value), then wait for it to STOP?
@@ -355,6 +366,8 @@ SendTransaction_PrintPhoto_NoFrame:
     ; This implies to me it's a probabalistic error caused by packets being too close apart.
     push de
     call PrinterDebug_DisplayCurrentPrintingPhoto
+    ld b, PRINT_ENDLOOP_DELAY_FRAMES
+    call Printer_Delay_b_Frames
     pop de
     ;For waiting for a printer, bit 2 (image data full) MAY be set, but for this borderless photo we don't fill up the buffer, so it shouldn't be set.
     ;Wait for bit 1 unset
@@ -919,8 +932,16 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   add a,$60
   ld [de],a
 
- /* ;Wait 16 frames to display it
-  ld b,$10
+ret
+
+
+/*
+* Delay for b frames.
+* Only use when interrupts are disabled; it checks for VBlank, so if an ISR denies it VBlank, it may infinite loop.
+* @param b: number of frames to delay for.
+*/
+Printer_Delay_b_Frames:
+ ;Wait 16 frames to display it
   .displayWait
   :ldh a,[rSTAT] ;Wait for HBlank
   and a,%00000011
@@ -932,8 +953,6 @@ PrinterDebug_DisplayCurrentPrintingPhoto:
   jr nz,:-
   dec b
   jr nz,.displayWait
-*/
-
 ret
 
 

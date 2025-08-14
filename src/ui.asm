@@ -1577,23 +1577,6 @@ DrawSettings:
   call DrawSetting_Double_Speed
 ret
 
-;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
-macro SETTINGS_PUT_TILEMAP_ADDR_IN_R16
-  DEF TEMPADDR = _SCRN1
-  ;Get address of logical line
-  IF (SCREEN_FLIP_V)
-    DEF TEMPADDR += (31-\2)*32
-  ELSE
-    DEF TEMPADDR += (\2)*32
-  ENDC
-
-  IF (SCREEN_FLIP_H)
-    DEF TEMPADDR += 19-\1
-  ELSE
-    DEF TEMPADDR += \1
-  ENDC
-  ld \3,TEMPADDR
-endm
 
 DrawSetting_SerialRemote:
   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,0,HL
