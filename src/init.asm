@@ -183,28 +183,10 @@ InitInput:
 	ld a, [hli]	;1b2c
 	ld [GetInputROM+2], a ; 3b4c high bit
 
-InitPalettes:
-ld a, $80
-ldh [rBCPS],a ;Set BG palette index to 0, auto-increment
-ldh [rOCPS],a ;Set OBJ palette index to 0, auto-increment
-
-.init_palette
-  ld  b,NUM_OBJ_PALETTES*$08
-  ld  hl,PaletteOBJ
-.palette_loop_obj
-  ld  a,[hl+]
-  ldh  [rOCPD],a
-  dec b
-  jr  nz,.palette_loop_obj
-  ld hl,PaletteBG
-  ld  b,NUM_BG_PALETTES*$08
-.palette_loop_bg
-  ld  a,[hl+]
-  ldh  [rBCPD],a
-  dec b
-  jr  nz,.palette_loop_bg
-
-
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+  
 ;Changes tile attributes in the VRAM bank 1 attribute map.
 ;Also fills the tilemaps to point to the correct VRAM bank, making the area that we use as the window (the top) use tiles from VRAM bank 1 
 InitTilemapAttributes:
@@ -214,8 +196,6 @@ InitTilemapAttributes:
   ;Set bit 6+5 of each byte in the 32x32 attribute tilemap 1:0x9800-9BFF
   ;Bit 3 controls the VRAM bank the tile is pulled from
   DEF FLIP_ATTRS EQU SCREEN_FLIP_V<<6 | SCREEN_FLIP_H<<5
-  DEF UI_PALETTE_ID EQU 0
-  DEF CAPTURE_PALETTE_ID EQU 2
   ld a, FLIP_ATTRS | %00001000 | UI_PALETTE_ID; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 

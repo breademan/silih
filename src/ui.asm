@@ -1292,6 +1292,14 @@ Setting_AEB_Interval_SetDefault:
   call Setting_AEB_Interval_Sanitize
 ret
 
+Setting_Palette_Scheme_SetDefault:
+  ld a,$01
+  ld [Setting_Palette_Scheme],a
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
 ; @arg a: max
 ; @arg b: min
 ; @arg hl: address of variable
@@ -1468,6 +1476,30 @@ Setting_Burst_AEB_Sanitize:
 
 ret
 
+Setting_Palette_Scheme_Inc:
+  ld hl,Setting_Palette_Scheme_Min+1
+  ld a, [hld] ; max in a
+  ld b,[hl]   ; min in b
+  ld hl, Setting_Palette_Scheme
+  call IncByteWithWraparound
+  
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
+Setting_Palette_Scheme_Dec:
+  ld hl,Setting_Palette_Scheme_Min
+  ld a, [hli] ; min in a
+  ld b,[hl]   ; max in b
+  ld hl, Setting_Palette_Scheme
+  call DecByteWithWraparound
+
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
 
 ;If modifying AEB interval, it should be stuck at zero if the mode is burst
 ;@arg hl: Address of Setting_AEB_Interval
@@ -1575,6 +1607,7 @@ DrawSettings:
   call DrawSetting_AEB_Interval
   call DrawSetting_Print_Speed
   call DrawSetting_Double_Speed
+  call DrawSetting_Palette_Scheme
 ret
 
 
@@ -1681,6 +1714,16 @@ DrawSetting_Double_Speed:
   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,7,HL
   ld a,[Setting_Double_Speed]
   add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_Palette_Scheme:
+  ld a,[Setting_Palette_Scheme]
+  ld c,a
+  and a, $0F
+  add a,UI_ICONS_BASE_ID
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,8,hl
   ld b,a
   call DrawTileInHBlank
 ret

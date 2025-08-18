@@ -221,20 +221,7 @@ reti
 WaitPrinterTimeout:
   push bc
   ld b,$10
-  .waitbFrames
-    .waitForHBlank
-      ldh a,[rSTAT]
-      and a,%00000011 ;read PPU mode into a
-      jr nz,.waitForHBlank ;as long as PPU mode is non-zero (not HBlank), wait
-
-    .waitForVBlank
-      ldh a,[rSTAT]
-      and a,%00000011
-      dec a ;check if a=1
-      jr nz,.waitForVBlank
-
-    dec b
-    jr nz,.waitbFrames
+  call Printer_Delay_b_Frames
   pop bc
 ret
 
@@ -709,15 +696,7 @@ reti
 *@clobber a,b,de
 */
 PrinterDebug_DisplayResult:
-  ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
-  :ldh a,[rSTAT] ;Wait for HBlank
-  and a,%00000011
-  jr nz,:-
-  ;wait for VBlank
-  :ldh a,[rSTAT]
-  and a,%00000011
-  cp a,$01
-  jr nz,:-
+  call WaitForVBlankStart
   ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
   ;$9C30 is the right 4 tiles and should be overwritten once we get back to the main loop.
   ld de,$9C30  ;ignores flip
@@ -747,17 +726,7 @@ PrinterDebug_DisplayResult:
 
   ;Wait 16 frames to display it
   ld b,$10
-  .displayWait
-  :ldh a,[rSTAT] ;Wait for HBlank
-  and a,%00000011
-  jr nz,:-
-  ;wait for VBlank
-  :ldh a,[rSTAT]
-  and a,%00000011
-  cp a,$01
-  jr nz,:-
-  dec b
-  jr nz,.displayWait
+  call Printer_Delay_b_Frames
 
   ;Wait for a button press
   xor a
@@ -892,15 +861,7 @@ ret
 *@clobber a,b,de,hl
 */
 PrinterDebug_DisplayCurrentPrintingPhoto:
-  ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
-  :ldh a,[rSTAT] ;Wait for HBlank
-  and a,%00000011
-  jr nz,:-
-  ;wait for VBlank
-  :ldh a,[rSTAT]
-  and a,%00000011
-  cp a,$01
-  jr nz,:-
+  call WaitForVBlankStart
   ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
   ;$9C50 is the right 4 tiles and should be overwritten once we get back to the main loop.
   ld de,$9C50  ;ignores 
@@ -938,19 +899,11 @@ ret
 /*
 * Delay for b frames.
 * Only use when interrupts are disabled; it checks for VBlank, so if an ISR denies it VBlank, it may infinite loop.
-* @param b: number of frames to delay for.
+* @param b: number of frames to delay for. b=0 is 256 frames.
 */
 Printer_Delay_b_Frames:
- ;Wait 16 frames to display it
   .displayWait
-  :ldh a,[rSTAT] ;Wait for HBlank
-  and a,%00000011
-  jr nz,:-
-  ;wait for VBlank
-  :ldh a,[rSTAT]
-  and a,%00000011
-  cp a,$01
-  jr nz,:-
+  call WaitForVBlankStart
   dec b
   jr nz,.displayWait
 ret

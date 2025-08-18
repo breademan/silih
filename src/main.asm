@@ -78,7 +78,7 @@ ENDU
   BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
-  ;9 bytes
+  ;10 bytes
   Setting_SerialRemote:: db ;When set, enables serial remote control.
   Setting_AEB_Interval:: db ;AEB shift: each AEB step either adds or subtracts previousExposure/(2 to the power of this value)
   Setting_AEB_Count:: db  ;Burst shot / AEB count: how many captures are taken if in Burst/AEB mode.
@@ -88,6 +88,7 @@ ENDU
   Setting_OnTakeAction:: db ;OnTakeAction: determines what happens when a capture is completed and user confirms (for single shot), and when a capture is completed (in burst/AEB mode)
   Setting_Print_Speed:: db ; Determines whether SC bit 1 (clock speed) is set when printing or transferring.
   Setting_Double_Speed:: db ; Holds whether the GBC is in single- or double-speed mode. 
+  Setting_Palette_Scheme:: db ; Holds the user-selected palette scheme (a set of BG and OBJ palettes)
   ;2 bytes
   BurstShotRemainingCaptures: db
   BurstShotCurrentCapture: db
@@ -106,7 +107,7 @@ ENDU
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
 
   ;Cumulative $FC bytes
-  ;$03 bytes remaining
+  ;$02 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
@@ -182,10 +183,6 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ;sprite1+palette0
   ;sprite1+palette1 --simpler if we set to sprite 0
   ;sprite0+palette1 --simpler if we set to sprite 1
-  DEF CURSOR_SPRITE_0 EQU 2
-  DEF CURSOR_SPRITE_1 EQU 3
-  DEF CURSOR_PALETTE_0 EQU 0
-  DEF CURSOR_PALETTE_1 EQU 1
 
   .periodFourCheck
   bit 1,a
@@ -1715,12 +1712,17 @@ SetBGPalette0to0::
 * If BGPaletteChangeFlag is set, change the BG Palette in BGPaletteChangeDest to the stored palette in BGPaletteChangeSrc.
 * Called in the VBlank ISR. 
 * When changing these variables, set BGPaletteChangeFlag LAST, in case the VBlank ISR runs while writing to these 3 variables.
-* @clobber a,de,hl
+* @clobber a,bc,de,hl, c
 */
 ModifyPalette:
+  ldh a,[rSVBK]
+  ld c,a ;save WRAM bank to c
+  ld a,GRAPHICS_BANK
+  ldh [rSVBK],a
+
   ld a,[BGPaletteChangeFlag] ;If flag is unset, do nothing
   and a
-  ret z
+  jr z,.cleanup
   xor a
   ld [BGPaletteChangeFlag],a ;If flag is set, reset it and load the palette
   ld a,[BGPaletteChangeSrc] ;add the src index (which should be passed as 8*palette index) to the address of the palette table.
@@ -1735,6 +1737,9 @@ ModifyPalette:
   ldh [rBCPD],a ;3c
   dec b ;1c
   jr nz,:- ;3c
+.cleanup
+  ld a,c
+  ldh [rSVBK],a
 ret
 
 /**
@@ -2061,18 +2066,29 @@ Speed_Switch::
   ldh [rIE], a
 ret
 
-  ;---------------------------------Save Data Functions-----------------------------------------------------
-  INCLUDE "src/save.asm"
+;Waits for the start of VBlank
+;Assumes VBlank interrupt is already disabled.
+;Assumes LCD is on; may infinite loop if LCD is off.
+;@clobber a
+;TODO: Just wait for LY=decimal144 instead? This does not guarantee you're at the START of that line, though, and so you'd have to assume you're starting at the END of line 144.
+;       This would delay for less time than the prior implementation by somewhere between a frame and a frame minus a line -- if it's called on line 144. 
+WaitForVBlankStart::
+  ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
+  :ldh a,[rSTAT] ;Wait for HBlank
+  and a,%00000011
+  jr nz,:-
+  ;wait for VBlank
+  :ldh a,[rSTAT]
+  and a,%00000011
+  cp a,$01
+  jr nz,:-
+ret
+
+;---------------------------------Save Data Functions-----------------------------------------------------
+INCLUDE "src/save.asm"
 
 
-    ;-------------------------------------------DATA-------------------------------
-Palette:
-PaletteBG: ;TODO: This is a misnomer; however, at the moment, we use the same source palette for OBJ and BG palettes.
-PaletteOBJ:
-    ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
-    ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
-    ;In the bin file, specify in RGB555: (dont-care/0):Blue5:Green5:Red5
-    INCBIN "assets/palette.bin"
+;-------------------------------------------DATA-------------------------------
 
 ;Constant values space
 ; ;define the SelectedOptionsEntry struct
