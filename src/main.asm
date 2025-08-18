@@ -78,7 +78,7 @@ ENDU
   BGPaletteChangeDest: db ; Index of destination BG palette to be changed.
   BGPaletteChangeFlag: db ; When this is set, the Vblank handler should set the background palette according to BGPaletteChange{Src,Dest). This flag should be set after the other 2.
   
-  ;7 bytes
+  ;10 bytes
   Setting_SerialRemote:: db ;When set, enables serial remote control.
   Setting_AEB_Interval:: db ;AEB shift: each AEB step either adds or subtracts previousExposure/(2 to the power of this value)
   Setting_AEB_Count:: db  ;Burst shot / AEB count: how many captures are taken if in Burst/AEB mode.
@@ -86,7 +86,9 @@ ENDU
   Setting_DelayTime:: db
   Setting_TimerEnable:: db
   Setting_OnTakeAction:: db ;OnTakeAction: determines what happens when a capture is completed and user confirms (for single shot), and when a capture is completed (in burst/AEB mode)
-
+  Setting_Print_Speed:: db ; Determines whether SC bit 1 (clock speed) is set when printing or transferring.
+  Setting_Double_Speed:: db ; Holds whether the GBC is in single- or double-speed mode. 
+  Setting_Palette_Scheme:: db ; Holds the user-selected palette scheme (a set of BG and OBJ palettes)
   ;2 bytes
   BurstShotRemainingCaptures: db
   BurstShotCurrentCapture: db
@@ -98,9 +100,14 @@ ENDU
   SidebarBuffer:: ds $38 ;4x14 bytes: holds the tilemap information for the vertical UI. Must be aligned on 256 within a line due to 8-bit math
   BurstExposureList: ds $1E ; Stored little-endian, same as CamOptC_RAM, opposite of CamOptA00x
                             ; to hold $0F C-values, we need $0F * 2 bytes
+  SerialEnable:: db  ; This is used by printing logic to tell the serial input logic to stop. Initialized to 1. 
+                    ; When 0, we should stop initiating transfers with the remote control, since these will interfere with the printer's transfers.
+
+
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
-  ;Cumulative $FA bytes
-  ;$06 bytes remaining
+
+  ;Cumulative $FC bytes
+  ;$02 bytes remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
@@ -121,7 +128,7 @@ MainLoop:
   xor a
   ldh [VBlank_finished_flag],a ;clear the VBlank finished flag
 
-  call GetSerialInput
+  call GetInput
 
   ld a, UI_RAMBANK
   ldh [rSVBK], a
@@ -176,10 +183,6 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ;sprite1+palette0
   ;sprite1+palette1 --simpler if we set to sprite 0
   ;sprite0+palette1 --simpler if we set to sprite 1
-  DEF CURSOR_SPRITE_0 EQU 2
-  DEF CURSOR_SPRITE_1 EQU 3
-  DEF CURSOR_PALETTE_0 EQU 0
-  DEF CURSOR_PALETTE_1 EQU 1
 
   .periodFourCheck
   bit 1,a
@@ -829,6 +832,7 @@ ret
 * @param e: WRAM bank to switch to
 * @param hl: address of callee
 * @clobber a,bc, and whatever the function it calls clobbers.
+* @return d: (optional) callee may use this as a return register.
 */
 Trampoline_hl_e::
   ldh a,[rSVBK]
@@ -1556,6 +1560,12 @@ memcmp::
 ret
 
 /**
+* Function on ROM -- gets input and updates several variables.
+* clobber a, ???? but not d
+*/
+GetInputROM:: jp $0000
+
+/**
 * Sets the registers as if not-CGB and jumps back to the launcher ROM, which launches the alternate payload.
 */
 LaunchAlternativePayload::
@@ -1564,23 +1574,29 @@ LaunchAlternativePayload::
   jp $100 ; jp back to launcher ROM
 
 /**
+* Gets input, whether from keypad or remote control, and puts it into joypad_active.
+*/
+GetInput::
+ld a,[Setting_SerialRemote]
+ld d, a
+ld a,[SerialEnable]
+and a,d ; a = Setting_SerialRemote & SerialEnable
+jr nz,:+ ; If it's OK to use the serial port, jump.
+call GetInputROM
+ret
+:call GetSerialInput
+ret
+
+/**
 * Gets input and puts it into joypad_active
 * If Setting_SerialRemote is set, also initiates a serial transfer and updates joypad_active from serial controller.
 */
 GetSerialInput:
-  ld a,[Setting_SerialRemote] ; If serial remote is disabled, skip serial transfer
-  and a
-  ld d,a ;Store Setting_SerialRemote in d. ROM's getInput doesn't clobber c,d,e
-  jr z,GetInputPtr
   .startTransfer
   ld a, SCF_START | SCF_SPEED | SCF_SOURCE ;Transfer enable, high clock speed, internal clock
   ldh [rSC], a
   ;Input format is D U L R: START SEL A B
-  GetInputPtr: call $0000
-
-  ld a,d   ; If serial remote is disabled, skip
-  and a
-  ret z
+  : call GetInputROM
   ;Here, the transfer should be finished and SC should be reset to 0.
   ;TODO: wait for SC to be low, with timeout. Currently we just assume the transfer finished.
   ldh a,[rSB]
@@ -1696,12 +1712,17 @@ SetBGPalette0to0::
 * If BGPaletteChangeFlag is set, change the BG Palette in BGPaletteChangeDest to the stored palette in BGPaletteChangeSrc.
 * Called in the VBlank ISR. 
 * When changing these variables, set BGPaletteChangeFlag LAST, in case the VBlank ISR runs while writing to these 3 variables.
-* @clobber a,de,hl
+* @clobber a,bc,de,hl, c
 */
 ModifyPalette:
+  ldh a,[rSVBK]
+  ld c,a ;save WRAM bank to c
+  ld a,GRAPHICS_BANK
+  ldh [rSVBK],a
+
   ld a,[BGPaletteChangeFlag] ;If flag is unset, do nothing
   and a
-  ret z
+  jr z,.cleanup
   xor a
   ld [BGPaletteChangeFlag],a ;If flag is set, reset it and load the palette
   ld a,[BGPaletteChangeSrc] ;add the src index (which should be passed as 8*palette index) to the address of the palette table.
@@ -1716,6 +1737,9 @@ ModifyPalette:
   ldh [rBCPD],a ;3c
   dec b ;1c
   jr nz,:- ;3c
+.cleanup
+  ld a,c
+  ldh [rSVBK],a
 ret
 
 /**
@@ -2016,18 +2040,55 @@ GetAEBExposure::
   ld l,a
 ret
 
-  ;---------------------------------Save Data Functions-----------------------------------------------------
-  INCLUDE "src/save.asm"
+/* Switches speed to single-speed (a=$00) or double-speed (a=$80/KEY1F_DBLSPEED).
+* @param b: Target speed. 0 is single-speed, KEY1F_DBLSPEED is double-speed. 
+* @clobber a,b
+*/
+Speed_Switch::
+  ldh a,[rKEY1] ; get current speed
+  and a,KEY1F_DBLSPEED ;check bit 7
+  cp a,b ; If current speed and target speed are the same, abort
+  ret z
+
+  ldh a,[rIE]
+  ld b,a ; Store IE in b
+  xor a
+  ldh [rIE],a ; IE = $00. If IE & IF != 0, 
+  ld a,P1F_GET_NONE
+  ldh [rP1],a; JOYP = $30. Read neither buttons nor dpad, forcing lower bits to $F (nothing held). 
+  ld a,KEY1F_PREPARE
+  ldh [rKEY1],a ; Arm speed switch.
+  stop ; Initiate speed switch
+
+  xor a
+  ldh [rIF],a   ;clear interrupt flags: VBlank handler may trigger in wrong mode if we don't do this.
+  ld a,b ; Restore interrupt state from b
+  ldh [rIE], a
+ret
+
+;Waits for the start of VBlank
+;Assumes VBlank interrupt is already disabled.
+;Assumes LCD is on; may infinite loop if LCD is off.
+;@clobber a
+;TODO: Just wait for LY=decimal144 instead? This does not guarantee you're at the START of that line, though, and so you'd have to assume you're starting at the END of line 144.
+;       This would delay for less time than the prior implementation by somewhere between a frame and a frame minus a line -- if it's called on line 144. 
+WaitForVBlankStart::
+  ;wait for VBlank -- mode 0 HBlank, then mode 1(VBlank)
+  :ldh a,[rSTAT] ;Wait for HBlank
+  and a,%00000011
+  jr nz,:-
+  ;wait for VBlank
+  :ldh a,[rSTAT]
+  and a,%00000011
+  cp a,$01
+  jr nz,:-
+ret
+
+;---------------------------------Save Data Functions-----------------------------------------------------
+INCLUDE "src/save.asm"
 
 
-    ;-------------------------------------------DATA-------------------------------
-Palette:
-PaletteBG: ;TODO: This is a misnomer; however, at the moment, we use the same source palette for OBJ and BG palettes.
-PaletteOBJ:
-    ;Palette format is OBJ palette:BG palette. The number of each is defined in NUM_BG_PALETTES and NUM_OBJ_PALETTES
-    ;Palettes in the bin file are specified in big-endian: RGBDS will automatically convert them to little-endian
-    ;In the bin file, specify in RGB555: (dont-care/0):Blue5:Green5:Red5
-    INCBIN "assets/palette.bin"
+;-------------------------------------------DATA-------------------------------
 
 ;Constant values space
 ; ;define the SelectedOptionsEntry struct

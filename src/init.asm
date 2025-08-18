@@ -72,6 +72,7 @@ InitVariables:
 
   ld a, $01
   ld [ShowPromptsFlag], a
+  ld [SerialEnable],a
 
   ld a,$03
   ld [CamOptEdgeMode],a
@@ -87,6 +88,14 @@ InitSettings:
 
   INCLUDE "src/settings.inc"
 
+  .resetPatchCode_PrintSpeed:
+  ld hl, PatchCode_PrintSpeed
+  ld e,PRINTER_RAMBANK
+  call Trampoline_hl_e
+
+  .resetDoubleSpeed
+  ld b,$00  ; Set speed to normal-speed. May be necessary when switching back from a double-speed handover.
+  call Speed_Switch
 
 ;When returning from ROM handover, we want to restore WRAM0. This will reset working variables and fix any polymorphic code changes that may have been made
 BackupBank0:
@@ -170,32 +179,14 @@ InitInput:
 	
 	;Put the address into the 2nd/3rd bytes of a CALL n16 instruction
 	ld a, [hli] 	;1b2c
-	ld [GetInputPtr+1], a ;3b4c low bit
+	ld [GetInputROM+1], a ;3b4c low bit
 	ld a, [hli]	;1b2c
-	ld [GetInputPtr+2], a ; 3b4c high bit
+	ld [GetInputROM+2], a ; 3b4c high bit
 
-InitPalettes:
-ld a, $80
-ldh [rBCPS],a ;Set BG palette index to 0, auto-increment
-ldh [rOCPS],a ;Set OBJ palette index to 0, auto-increment
-
-.init_palette
-  ld  b,NUM_OBJ_PALETTES*$08
-  ld  hl,PaletteOBJ
-.palette_loop_obj
-  ld  a,[hl+]
-  ldh  [rOCPD],a
-  dec b
-  jr  nz,.palette_loop_obj
-  ld hl,PaletteBG
-  ld  b,NUM_BG_PALETTES*$08
-.palette_loop_bg
-  ld  a,[hl+]
-  ldh  [rBCPD],a
-  dec b
-  jr  nz,.palette_loop_bg
-
-
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+  
 ;Changes tile attributes in the VRAM bank 1 attribute map.
 ;Also fills the tilemaps to point to the correct VRAM bank, making the area that we use as the window (the top) use tiles from VRAM bank 1 
 InitTilemapAttributes:
@@ -205,8 +196,6 @@ InitTilemapAttributes:
   ;Set bit 6+5 of each byte in the 32x32 attribute tilemap 1:0x9800-9BFF
   ;Bit 3 controls the VRAM bank the tile is pulled from
   DEF FLIP_ATTRS EQU SCREEN_FLIP_V<<6 | SCREEN_FLIP_H<<5
-  DEF UI_PALETTE_ID EQU 0
-  DEF CAPTURE_PALETTE_ID EQU 2
   ld a, FLIP_ATTRS | %00001000 | UI_PALETTE_ID; bank 1, flip tiles over X and Y if that's set
   ld hl, $9800
 
@@ -490,8 +479,8 @@ cp a,$A0
 jr nz,:-
 
 
-;TODO: put this table somewhere else to avoid needless jr instruction
-jr :+
+;TODO: put this table somewhere else to avoid needless jp instruction
+jp :+
 SETTINGS_STRINGS_TABLE:
 
 MACRO X

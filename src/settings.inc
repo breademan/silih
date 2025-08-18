@@ -15,6 +15,7 @@
   \9 initial value (default value is set manually in the default function)
   TODO: Slashes higher than \9 are not allowed, so later values won't be used.
   \10 Function to draw the value of the setting to the screen
+  \11 Initial value
 
 */
   DEF SETTINGS_X_INDEX = 0
@@ -25,7 +26,12 @@
   X "MODE", Setting_Burst_AEB,                    $01,  $00,  $02, Setting_Burst_AEB_Dec,Setting_Burst_AEB_Inc,Setting_Burst_AEB_SetDefault, $00, DrawSetting_Burst_AEB, 0
   X "SHOT COUNT", Setting_AEB_Count,             $01,  $01,  $0F, Setting_AEB_Count_Dec, Setting_AEB_Count_Inc, Setting_AEB_Count_SetDefault, $01, DrawSetting_AEB_Count, 3
   X "AEB SHIFT", Setting_AEB_Interval,       $01,  $01,  $06, Setting_AEB_Interval_Dec, Setting_AEB_Interval_Inc, Setting_AEB_Interval_SetDefault, $01, DrawSetting_AEB_Interval, 3
-  X "PRINT ALL", NULL,                          $00,  $00,  $01, NullFunction, NullFunction, Init_PrintAll, $00, NullFunction, 0
+  X "FAST PRINT", Setting_Print_Speed,        $01,  $00,  $01,  Setting_Print_Speed_Toggle, Setting_Print_Speed_Toggle, Setting_Print_Speed_Toggle, $00, DrawSetting_Print_Speed, $00
+  X "DOUBLE SPEED", Setting_Double_Speed,     $01,  $00,  $01,  Setting_Double_Speed_Toggle, Setting_Double_Speed_Toggle, Setting_Double_Speed_Toggle, $00, DrawSetting_Double_Speed, $00
+  ;X "PRINT/XFER RANGE MIN", Setting_Print_Min,  $01, $01, $1E, Setting
+  X "PALETTE NUMBER", Setting_Palette_Scheme,   $01,  $01,  $02, Setting_Palette_Scheme_Dec, Setting_Palette_Scheme_Inc, Setting_Palette_Scheme_SetDefault, $01
+  X "PRINT ALL TEST", NULL,                          $00,  $00,  $01, NullFunction, NullFunction, Init_PrintAll, $00, NullFunction, 0
+  X "TRANSFER ALL", NULL,                       $00,  $00, $01, NullFunction, NullFunction, Init_TransferAll, $00, NullFunction, 0
   X "SAVE SETTINGS",NULL,                       $00,  $00,  $01, NullFunction, NullFunction, Init_SaveSettings, $00, NullFunction, 0
   X "SAVE CAM OPTIONS",NULL,                    $00,  $00,  $01, NullFunction, NullFunction, Init_SaveCamOpts, $00, NullFunction, 0
   X "DELETE ALL PHOTOS",NULL,                   $00,  $00, $01, NullFunction, NullFunction, Init_DeleteAll, $00

@@ -1,10 +1,12 @@
 DEF UI_RAMBANK EQU 1
 DEF STOCK_RAMBANK EQU 7
+DEF SCRATCH_RAMBANK EQU 7 ; When not running the ROM, this bank is unused, but will not retain data across handovers. This makes it perfect for storing large but temporary data.
 DEF TEST_CALLER_RAMBANK EQU 3
 DEF TEST_CALLEE_RAMBANK EQU 4
 DEF BACKUP_BANK EQU 6 ; Also stores the alternative payload for the loader, so don't set it to 7, as the location corresponding to bank 7 won't fit in 32K ROM space.
 DEF GRAPHICS_BANK EQU 2
-;DEF SAVE_RAMBANK EQU 2
+DEF PRINTER_RAMBANK EQU 5
+DEF SAVE_RAMBANK EQU 0 ; Currently the save RAMbank is held in unbanked WRAM. This may change.
 ;DEF INIT_RAMBANK EQU 2
 DEF JOYPAD_DOWN EQU 7
 DEF JOYPAD_UP EQU 6
@@ -84,10 +86,30 @@ DEF TILEMAP0_CAPTURE_ORIGIN EQU $9A44; $9800 + (18rows=$240) + 4
 DEF TILEMAP_UI_ORIGIN_V EQU $9A40 ;9800 + 18 rows ($240) this DOESN'T include the 'corner' at the top left.
 DEF TILEMAP_UI_ORIGIN_H EQU $99C0 ;$9800 + 14 rows -- this includes the 'edge' at the top left
 
+DEF NUM_PALETTES_IN_SCHEME EQU 4
+DEF NUM_BG_PALETTES EQU NUM_PALETTES_IN_SCHEME
+DEF NUM_OBJ_PALETTES EQU NUM_BG_PALETTES
+
+DEF NUM_PALETTE_SCHEMES EQU 2
+
+DEF UI_PALETTE_ID EQU 0
+DEF UI_PALETTE_FLASH EQU 1
+DEF CAPTURE_PALETTE_ID EQU 2
+
+DEF PALETTE_SCHEME_SIZE EQU 8*NUM_PALETTES_IN_SCHEME
+
+;Make sure PALETTE_SCHEME_SIZE is less than 256 so we can hold it in single register when adding to an r16
+assert PALETTE_SCHEME_SIZE < 256, "PALETTE_SCHEME_SIZE is too large to fit in an r8"
+
+DEF CURSOR_SPRITE_0 EQU 2
+DEF CURSOR_SPRITE_1 EQU 3
+DEF CURSOR_PALETTE_0 EQU 0
+DEF CURSOR_PALETTE_1 EQU 1
+
 ;Set if the screen is flipped vertically
-DEF SCREEN_FLIP_V EQU 0
+DEF SCREEN_FLIP_V EQU 1
 ;Set if the screen is flipped horizontally
-DEF SCREEN_FLIP_H EQU 0
+DEF SCREEN_FLIP_H EQU 1
 
 DEF MENU_STATE_CAMERA_OPTS EQU 0
 DEF MENU_STATE_DITHER_OPTS EQU 1
@@ -142,11 +164,7 @@ ELSE
 DEF UpdateByteInTilemap_rotation EQUS "UpdateByteInTilemap"
 ENDC
 
-
-DEF NUM_OBJ_PALETTES EQU 2
-DEF NUM_BG_PALETTES EQU 3
-
-DEF NUM_SETTINGS EQU 10
+DEF NUM_SETTINGS EQU 14
 DEF NULL EQU 00
 
 DEF TAKE_ACTION_SAVE EQU 0
@@ -160,3 +178,38 @@ DEF CAMERA_MODE_AEB EQU 2
 
 
 DEF ROM_OAM_DMA_WAITLOOP_COUNT EQU $0D
+
+DEF PRINTER_CMD_INIT EQU $01
+DEF PRINTER_CMD_PRINT EQU $02
+DEF PRINTER_CMD_DATA EQU $04
+DEF PRINTER_CMD_STATUS EQU $0F
+;Not a real printer command, unique to the Pico GB Printer's Transfer function
+DEF PRINTER_CMD_TRANSFER EQU $10
+
+DEF PRINTER_COMPRESSION_OFF EQU $00
+DEF PRINTER_COMPRESSION_ON EQU $01
+
+
+
+
+
+
+
+; MACROS
+;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
+macro SETTINGS_PUT_TILEMAP_ADDR_IN_R16
+  DEF TEMPADDR = _SCRN1
+  ;Get address of logical line
+  IF (SCREEN_FLIP_V)
+    DEF TEMPADDR += (31-\2)*32
+  ELSE
+    DEF TEMPADDR += (\2)*32
+  ENDC
+
+  IF (SCREEN_FLIP_H)
+    DEF TEMPADDR += 19-\1
+  ELSE
+    DEF TEMPADDR += \1
+  ENDC
+  ld \3,TEMPADDR
+endm

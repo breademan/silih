@@ -634,17 +634,25 @@ InitMenuState_Settings:
   xor a
   ldh [SettingsPosition],a
   ldh [SettingsNybble],a
-  ldh [rSCX], a
-  IF (SCREEN_FLIP_V)
-  ld a,8*(32-18)
-  ENDC
-  ldh [rSCY], a
   ;move cursor to appropriate position.
   call MoveCursorSpriteToSettingsPosition
   ;set LCDC.3 to 1 (tilemap 1)
   ld a,[wLCDC]
   set 3,a
   ld [wLCDC],a
+
+  ;Wait for VBlank handler to set the appropriate bit in rLCDC.
+  :ldh a,[rLCDC]
+  bit 3,a
+  jr z,:-
+
+  xor a ; Scroll to initial position in Settings
+  ldh [rSCX], a
+  IF (SCREEN_FLIP_V)
+  ld a,8*(32-18)
+  ENDC
+  ldh [rSCY], a
+
 ret
 
 MoveCursorSpriteToSettingsPosition:
@@ -1284,6 +1292,14 @@ Setting_AEB_Interval_SetDefault:
   call Setting_AEB_Interval_Sanitize
 ret
 
+Setting_Palette_Scheme_SetDefault:
+  ld a,$01
+  ld [Setting_Palette_Scheme],a
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
 ; @arg a: max
 ; @arg b: min
 ; @arg hl: address of variable
@@ -1460,6 +1476,30 @@ Setting_Burst_AEB_Sanitize:
 
 ret
 
+Setting_Palette_Scheme_Inc:
+  ld hl,Setting_Palette_Scheme_Min+1
+  ld a, [hld] ; max in a
+  ld b,[hl]   ; min in b
+  ld hl, Setting_Palette_Scheme
+  call IncByteWithWraparound
+  
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
+Setting_Palette_Scheme_Dec:
+  ld hl,Setting_Palette_Scheme_Min
+  ld a, [hli] ; min in a
+  ld b,[hl]   ; max in b
+  ld hl, Setting_Palette_Scheme
+  call DecByteWithWraparound
+
+  ld hl, InitPaletteScheme
+  ld e, GRAPHICS_BANK
+  call Trampoline_hl_e
+ret
+
 
 ;If modifying AEB interval, it should be stuck at zero if the mode is burst
 ;@arg hl: Address of Setting_AEB_Interval
@@ -1471,8 +1511,51 @@ Setting_AEB_Interval_Sanitize:
   ld [hl],a ; Set Interval to 00
 ret
 
+Setting_Print_Speed_Toggle:
+  ld a,[Setting_Print_Speed]
+  xor a,$01
+  ld [Setting_Print_Speed],a
+  ;Trampoline call PatchCode_PrintSpeed
+  ld hl, PatchCode_PrintSpeed
+  ld e,PRINTER_RAMBANK
+  call Trampoline_hl_e
+ret
+
+Setting_Double_Speed_Toggle:
+  ld a,[Setting_Double_Speed]
+  xor a,$01
+  ld [Setting_Double_Speed],a
+  
+  ld b,$00
+  and a ;if Setting_Double_Speed is 0, pass 0 (single-speed to Speed_Switch)  
+  jr z,:+
+  ld b,KEY1F_DBLSPEED
+  :call Speed_Switch
+
+ret
+
 Init_PrintAll:
-  ;TODO
+  ld hl, ActionDetectPrinter ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+
+  ld hl, ActionPrintAll ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+ret
+
+Init_TransferAll:
+  ld hl, ActionDetectPrinter ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
+
+  ;xor a
+  ;cp a,d ;If PACKET_ERROR is non-zero, don't start transfer--printer is not connected.
+  ;ret nz
+
+  ld hl, ActionTransferAll ; addr of the callee
+  ld e, PRINTER_RAMBANK ;bank which the callee is in
+  call Trampoline_hl_e
 ret
 
 Init_SaveSettings:
@@ -1522,26 +1605,11 @@ DrawSettings:
   call DrawSetting_Burst_AEB
   call DrawSetting_AEB_Count
   call DrawSetting_AEB_Interval
-
+  call DrawSetting_Print_Speed
+  call DrawSetting_Double_Speed
+  call DrawSetting_Palette_Scheme
 ret
 
-;Takes a LOGICAL X,Y (\1,\2) value (rotation-independent) of a tile on the settings screen and returns its address in the tilemap into R16 (\3).
-macro SETTINGS_PUT_TILEMAP_ADDR_IN_R16
-  DEF TEMPADDR = _SCRN1
-  ;Get address of logical line
-  IF (SCREEN_FLIP_V)
-    DEF TEMPADDR += (31-\2)*32
-  ELSE
-    DEF TEMPADDR += (\2)*32
-  ENDC
-
-  IF (SCREEN_FLIP_H)
-    DEF TEMPADDR += 19-\1
-  ELSE
-    DEF TEMPADDR += \1
-  ENDC
-  ld \3,TEMPADDR
-endm
 
 DrawSetting_SerialRemote:
   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,0,HL
@@ -1634,6 +1702,31 @@ DrawSetting_AEB_Interval:
 
 ret
 
+DrawSetting_Print_Speed:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,6,HL
+  ld a,[Setting_Print_Speed]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_Double_Speed:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,7,HL
+  ld a,[Setting_Double_Speed]
+  add a,CHECKBOX_TILE_ID_DIS
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_Palette_Scheme:
+  ld a,[Setting_Palette_Scheme]
+  ld c,a
+  and a, $0F
+  add a,UI_ICONS_BASE_ID
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,8,hl
+  ld b,a
+  call DrawTileInHBlank
+ret
 
 ;Waits for Hblank and draws a single tileID b to tilemap location hl
 ;To interface with its callee, side effect: Returns with hl incremented if not horizontally flipped
