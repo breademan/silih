@@ -831,6 +831,7 @@ ret
 * Callee adds 6 to sp to reach pre-trampoline top of stack and access arguments.
 * @param e: WRAM bank to switch to
 * @param hl: address of callee
+* @param d: (optional) caller may use this as a single-byte parameter instead of stack.
 * @clobber a,bc, and whatever the function it calls clobbers.
 * @return d: (optional) callee may use this as a return register.
 */

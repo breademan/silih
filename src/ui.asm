@@ -634,25 +634,167 @@ InitMenuState_Settings:
   xor a
   ldh [SettingsPosition],a
   ldh [SettingsNybble],a
-  ;move cursor to appropriate position.
-  call MoveCursorSpriteToSettingsPosition
-  ;set LCDC.3 to 1 (tilemap 1)
+  
+  call InitSettingsGfx
+
+ret
+
+
+InitSettingsGfx::
+
+  ;Use tilemap 1 for the BG (set LCDC.3 to 1 
   ld a,[wLCDC]
   set 3,a
   ld [wLCDC],a
-
   ;Wait for VBlank handler to set the appropriate bit in rLCDC.
   :ldh a,[rLCDC]
   bit 3,a
   jr z,:-
 
-  xor a ; Scroll to initial position in Settings
+  ; Move cursor to appropriate position.
+  call MoveCursorSpriteToSettingsPosition
+  call ScrollToSettingsPosition
+
+  ldh a, [rVBK]
+  push af ; Back up VRAM bank
+  ;The below functions require the LCD to be off, so turn it off.
+  ;Disable interrupts
+  di
+
+  call WaitForVBlankStart
+  
+  ldh a,[rLCDC]
+  push af ; Backup LCDC
+  res 7,a
+  ldh [rLCDC],a ; Disable LCD
+
+
+  call ClearSettingsTilemap
+  call DrawSettingsTilemap_Static
+  
+  ;Restore LCDC
+  pop af
+  ldh [rLCDC], a
+
+  pop af
+  ldh [rVBK], a ; Restore VRAM bank
+  ;Clear and reenable interrupts
+  xor a
+  ldh [rIF],a
+  ei
+
+ret
+
+;Can be replaced by memfill16
+;clear from 9C00 to 9FFF
+ClearSettingsTilemap:
+  ld hl, _SCRN1
+  ld b, ALPHABET_BLANK_TILE_ID
+  :ld a,b
+  ld [hli],a
+  ld a,h
+  cp a,$A0
+  jr nz,:-
+ret
+
+
+SETCHARMAP SETTINGS_CHARMAP
+
+DrawSettingsTilemap_Static:
+  ld de, SETTINGS_STRINGS_TABLE
+  DEF SETTINGS_TILEMAP_START = _SCRN1
+  IF SCREEN_FLIP_V
+    DEF SETTINGS_TILEMAP_START += $03E0
+  ENDC
+  IF SCREEN_FLIP_H
+    DEF SETTINGS_TILEMAP_START += 19
+  ENDC
+  ld hl,SETTINGS_TILEMAP_START
+  ;outer loop:
+  .outerLoop
+  ;get length of string and place in b
+  ld a,[de]
+  inc de
+  ;if length is 0, finish outer loop
+  and a
+  jp z,.finishDraw
+  ld b,a
+
+  ;inner loop: write line
+  .innerLoop
+  ld a, [de]
+  IF SCREEN_FLIP_H
+    ld [hld],a
+  ELSE
+    ld [hli], a
+  ENDC
+  inc de
+  dec b ;if string finished, move de to point to next line
+  jr nz,.innerLoop
+
+  ;the left side of each line is 9C00 + $20*line number. 
+  IF SCREEN_FLIP_V
+  ld bc, -$0020 ;If going down (vflip), 16-bit sub 20 from dest pointer and reset the lower 5 bits.
+  ELSE
+  ld bc,$0020 ;If going up (no vflip), 16-bit add 20 to dest pointer and reset the lower 5 bits.
+  ENDC
+
+  add hl,bc
+  ld a, %11100000
+  and a,l
+  IF SCREEN_FLIP_H
+    add a,19 ;start write at end of line if horizontally flipped
+  ENDC
+  ld l,a
+  jp .outerLoop
+  .finishDraw
+
+  .fillAttributeMap
+  ;Fill the attribute map
+  ;switch to VRAM bank 1
+  ld a,$01
+  ldh [rVBK], a
+  ld hl, _SCRN1
+  ;set bit 3 (get tiles from vram1) and palette to the UI palette
+  DEF SETTINGS_STATIC_ATTR = %00001000
+  IF (SCREEN_FLIP_H)
+    DEF SETTINGS_STATIC_ATTR |= %00100000
+  ENDC
+  IF(SCREEN_FLIP_V)
+    DEF SETTINGS_STATIC_ATTR |= %01000000
+  ENDC
+  ;Can be replaced by memfill
+  :ld a,SETTINGS_STATIC_ATTR
+  ;fill until $9FFF
+  ld [hli],a
+  ld a,h
+  cp a,$A0
+  jr nz,:-
+  
+ret
+
+SETTINGS_STRINGS_TABLE:
+MACRO X
+    db STRLEN(\1),\1 
+  ENDM
+INCLUDE "src/settings.inc"
+db 0
+
+/**Set or reset scroll registers according to SettingsPosition
+* TODO: Currently stubbed to just scroll to a fixed location, since we don't yet have enough Settings to need to scroll.
+* SCX should be zero
+* SCY is more complicated due to needing to stop when the edges of the scroll window reach the first and last settings.
+*/
+ScrollToSettingsPosition:
+  xor a ; Scroll SCX to zero.
   ldh [rSCX], a
+
   IF (SCREEN_FLIP_V)
   ld a,8*(32-18)
+  ELSE
+  xor a
   ENDC
-  ldh [rSCY], a
-
+  ldh [rSCY], a ; Scroll SCY to the initial position.
 ret
 
 MoveCursorSpriteToSettingsPosition:

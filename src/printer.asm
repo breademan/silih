@@ -100,9 +100,8 @@ PrintAll_ToPrint: db ;local variable that holds the number of photos to print
 ActionPrintAll::
   di
 
-  ;TODO Use the state vector to figure out which photos are in which slot
-  ld a,30 ;Initialize picture counter -- TODO: Set it to however many pictures you actually have in active slots
-  ld [PrintAll_ToPrint],a ;TODO: replace this too
+  ld a,30 ;Initialize picture counter
+  ld [PrintAll_ToPrint],a
   
   ld a,[PrintAll_ToPrint]
   and a
@@ -121,12 +120,7 @@ ActionPrintAll::
   ld [rRAMB],a ;Switch to SRAM bank that holds State Vector
 
   ;Set hl and rRAMB to point to our photo. hl = $A000 if ID is even, $B000 if odd
-  ld a,[PrintAll_PictureCounter]  ;TODO: We're not looking at an even-or-odd image NUMBER 
-                                  ;(which tells you nothing about the address without looking up which slot it takes up in the SV)
-                                  ;but for an even or odd image SLOT
-                                  ;Therefore, after loading the PictureCounter, we should call a function that returns which slot the photo number is located in
-                                  ;return it in register a
-                                  ;For testing, just ignore active/inactive values and pretend the slot number IS the photo number, so just print slots in order
+  ld a,[PrintAll_PictureCounter]
   ld d,a
   ld hl,StateVector_GetImageSlot
   ld e,SAVE_RAMBANK
@@ -177,9 +171,16 @@ ActionPrintAll::
     ld a,[PrintAll_ToPrint]
     cp a,b ;cp ToPrint, (ID of next photo to print)
     jr z,.allPhotosFinished ;if all photos are finished printing, finish.
-  
-  ;If no errors and loop not finished, jump back to the beginning.
-  jr .printPhotoLoop
+
+  ; Check for B button press
+  push bc
+  push de
+  call GetInputROM 
+  pop de
+  pop bc
+  ldh a,[joypad_state]
+  and a,JOYPAD_B_MASK ; I forget if this is active-high like joypad_active or active-low like the actual registers.
+  jr z, .printPhotoLoop
 
 
   .generalError
@@ -197,6 +198,10 @@ ActionPrintAll::
   ld h,d
   ld l,e
   call PrinterDebug_DisplayResult
+  ;Redraw Settings screen
+  ld e,UI_RAMBANK
+  ld hl,InitSettingsGfx 
+  call Trampoline_hl_e
   xor a
   ldh [rIF],a
 reti
@@ -211,7 +216,7 @@ reti
   cp a,INTRANSACTION_STEP_PRINTPHOTO_WAITPRINTFINISH ;nc means StepNumber>=threshold
   jr nc,.printPhotoLoopCondition
   ;If step number is less than waiting-for-print-finish, assume print hasn't started and retry the transaction.
-  jr .retryPrintPhoto
+  jp .retryPrintPhoto
 
 
 /**
@@ -234,8 +239,6 @@ ret
 * @return b: TransactionError bitfield.
 */
 SendTransaction_PrintPhoto_NoFrame:
-  ;TODO: Ensure printer is connected by getting printer status.
-
   xor a
   ld [InTransaction_StepNumber],a ;Step 0, send init packet
   ;Clear buffer with an Init packet before sending packet.
@@ -305,32 +308,30 @@ SendTransaction_PrintPhoto_NoFrame:
     ;The very fast Pico Printer might shut off the "currently printing" flag before we get a chance to read it, leading to an infinite loop of waiting for print to start when it already has.
     bit 1,e
     ;if not printing, loop until it is
-    ;TODO: Add a WAIT_FOR_PRINT_START timeout
-  jr nz,.waitForPrintStart_End ;if no error and Printing flag is set, finish the waitloop.
-  ;TODO decrement Transaction_StepTimeoutCounter and loop if it's non-zero.
-  ld hl,Transaction_StepTimeoutCounter_lilE ;3c3b
-  ld a,[hli] ;2c1b
-  ld h,[hl] ;2c1b
-  ld l,a ;Load timeoutcounter into hl ;1c1b
+    jr nz,.waitForPrintStart_End ;if no error and Printing flag is set, finish the waitloop.
+    ;decrement Transaction_StepTimeoutCounter and loop if it's non-zero.
+    ld hl,Transaction_StepTimeoutCounter_lilE ;3c3b
+    ld a,[hli] ;2c1b
+    ld h,[hl] ;2c1b
+    ld l,a ;Load timeoutcounter into hl ;1c1b
 
-  dec hl
-  
-  ;Write back decremented timeout counter
-  ld a,l ;load l into base address
-  ld [Transaction_StepTimeoutCounter_lilE],a
-  ld a,h ;ld h into +1
-  ld [Transaction_StepTimeoutCounter_lilE+1],a
+    dec hl
+    
+    ;Write back decremented timeout counter
+    ld a,l ;load l into base address
+    ld [Transaction_StepTimeoutCounter_lilE],a
+    ld a,h ;ld h into +1
+    ld [Transaction_StepTimeoutCounter_lilE+1],a
 
-  ;test if hl==0
-  xor a
-  cp a,h
-  jr nz,.waitForPrintStart_Loop     ;if high(counter) is nz, loop.
-  xor a ;if high is zero, check whether low is zero.
-  cp a,l
-  jr nz,.waitForPrintStart_Loop
-  ;TODO If both high and low are zero, break the loop and throw a Step Timeout transaction error as we've reached timeout.
-  ld b,TRANSACTION_ERR_MASK_STEP_TIMEOUT
-  ret
+    ;test if hl==0
+    xor a
+    cp a,h
+    jr nz,.waitForPrintStart_Loop     ;if high(counter) is nz, loop.
+    xor a ;if high is zero, check whether low is zero.
+    cp a,l
+    jr nz,.waitForPrintStart_Loop
+    ld b,TRANSACTION_ERR_MASK_STEP_TIMEOUT ; If TransactionStepTimeoutCounter is 0, return a Step Timeout error in b
+    ret
 
   .waitForPrintStart_End
 
@@ -361,7 +362,7 @@ SendTransaction_PrintPhoto_NoFrame:
     ;Todo: add timeout, if the printer somehow ends up getting "stuck" printing
     bit 1,e
     ;if not printing, loop until it is
-    ;TODO: Add a WAIT_FOR_PRINT_START timeout
+    ;TODO: Add a WAIT_FOR_PRINT_END timeout
   jr nz,.waitForPrintEnd_Loop
 
   ld a,$06 ; Step 6: Wait for printer has ended
@@ -375,7 +376,6 @@ ret
 * @return e: status byte of the last packet
 * @return b: Error, if any, or 0.
 */
-;TODO: Modify references to use new return values of b and de.
 SendPacket_EmptyData:
   ld a,CHECKSUM_RETRIES
   ld [Packet_Checksum_RetryCount],a ;Initialize checksum retry counter
@@ -416,9 +416,6 @@ EmptyDataPacket: ;Does not include keepalive or status byte
 */
 Packet_ErrorCheck:
   ld b,PACKET_ERR_MASK_KEEPALIVE | PACKET_ERR_MASK_STATUS | PACKET_ERR_BIT_CHECKSUM ;2c
-  ;Check keepalive
-  ;TODO: We could just NOT return the keepalive to save a reg -- nothing should be using it instead of a.
-  
   ; Keepalive check: If no keepalive error, clear the corresponding bit in the error bitfield.
   ld a,d ;1c
   cp a,$81 ;2c
@@ -688,56 +685,6 @@ ActionDetectPrinter::
   ldh [rIF],a
 reti
 
-/**
-* Displays two bytes on the Settings screen, then waits for 16 frames and a button press.
-*This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
-*@param h: keepalive result, 0 for a success, other for fail
-*@param l: status register
-*@clobber a,b,de
-*/
-PrinterDebug_DisplayResult:
-  call WaitForVBlankStart
-  ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
-  ;$9C30 is the right 4 tiles and should be overwritten once we get back to the main loop.
-  ld de,$9C30  ;ignores flip
-  ;h: keepalive packet: 0 (ok) or 1 (bad)
-  ld a,h ;high nybble
-  swap a
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
-  ld a,h ;low nybble
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
-  ;l: printer status
-  ld a,l ;high nybble
-  swap a
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
-  ld a,l;low nybble
-  and a,$0F
-  add a,$60
-  ld [de],a
-
-  ;Wait 16 frames to display it
-  ld b,$10
-  call Printer_Delay_b_Frames
-
-  ;Wait for a button press
-  xor a
-  ld [joypad_active],a
-  :call GetInputROM
-  ld a,[joypad_active]
-  and a
-  jr z,:-
-  ; End display result 
-
-ret
 
 /**
 * Sends a byte over serial
@@ -775,7 +722,6 @@ SendByte_b_checksum_de:
   ld a,b ;load data into rSB
   ldh [rSB],a
   ;start transmission at normal speed
-  ;TODO: decide between normal and high speed later
   PatchCode_PrintSpeed_Location2: ;The second byte of the following instruction may be patchd to enable/disable fast printing
   ld a, SCF_START | SCF_SOURCE | SCF_SPEED
   ldh [rSC],a
@@ -854,8 +800,35 @@ SendMagicBytes:
   call SendByte_b
 ret
 
+; Draws a the value of a byte (two nybbles) to the tilemap in settings
+; Assumes we're outside of an interrupt, in VBlank.
+; @param h: byte to display to tilemap
+; @param de: address in tilemap to display to. Moves from low address to high address. 
+; @clobbers a,de
+; @returns de+1
+MACRO PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP
+  ; Load first nybble of our variable into low nybble of a. This is the high nybble if not flipped, low nybble if flipped.
+  IF (!SCREEN_FLIP_H) 
+    swap a
+  ENDC
+  and a,$0F
+  add a,UI_ICONS_BASE_ID ; Convert it to the tile ID of the corresponding hex character.
+  ld [de],a ; Put high nybble in lower tilemap address
+  inc de  ; Move to next tile in tilemap
+  ; Load second nybble of our variable into low nybble of a. This is the low nybble if not flipped, high nybble if flipped.
+  ld a,h 
+  IF (SCREEN_FLIP_H)
+    swap a 
+  ENDC
+  and a,$0F
+  add a,UI_ICONS_BASE_ID
+  ld [de],a
+
+ENDM
+
+
 /**
-* Displays two bytes (the currently printing photo number) on the Settings screen.
+* Displays two bytes (the currently printing photo number and the step number) on the Settings screen.
 * Also displays the step number within the SendTransaction
 *This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
 *@clobber a,b,de,hl
@@ -863,35 +836,69 @@ ret
 PrinterDebug_DisplayCurrentPrintingPhoto:
   call WaitForVBlankStart
   ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
-  ;$9C50 is the right 4 tiles and should be overwritten once we get back to the main loop.
-  ld de,$9C50  ;ignores 
+  ;The area should be overwritten once we get back to the main loop.
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,(NUM_SETTINGS+1),de
   
-  ld a,[PrintAll_PictureCounter]
-  ld h,a ;temporarily store the picture number in h
-  ;h: keepalive packet: 0 (ok) or 1 (bad)
-  ld a,h ;high 
-  swap a
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
-  ld a,h ;low nybble
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
+  ;Draw Picture Counter, then StepNumber
+  IF (!SCREEN_FLIP_H)
+    ld a,[PrintAll_PictureCounter]
+    ld h,a
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP
+    inc de
+    ld a,[InTransaction_StepNumber]
+    ld h,a
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP
+  ELSE
+    ld a,[InTransaction_StepNumber]
+    ld h,a
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP
+    inc de
+    ld a,[PrintAll_PictureCounter]
+    ld h,a    
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP PrintAll_PictureCounter
+  ENDC
+ret
 
-  ;Load step number
-  ld a,[InTransaction_StepNumber]
-  swap a
-  and a,$0F
-  add a,$60
-  ld [de],a
-  inc de
-  ld a,[InTransaction_StepNumber]
-  and a,$0F
-  add a,$60
-  ld [de],a
+/**
+* Displays two bytes on the Settings screen, then waits for some frames and a button press.
+*This assumes there are no interrupts happening (specifically the VBlank interrupt) and will take up to 16+1 frames
+*@param h: keepalive result, 0 for a success, other for fail
+*@param l: status register
+*@clobber a,b,de
+*/
+PrinterDebug_DisplayResult:
+  call WaitForVBlankStart
+  ;draw the results to the screen -- if we're in Settings, tilemap 9C00, pulling from VRAM1's tiles. Use TILE IDs $6x to draw numbers, $00 to draw text
+  ;$9C30 is the right 4 tiles and should be overwritten once we get back to the main loop.
+    SETTINGS_PUT_TILEMAP_ADDR_IN_R16 16,NUM_SETTINGS,de  ;ignores flip
+
+  IF (!SCREEN_FLIP_H)
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP ;draw h:keepalive packet
+    inc de
+    ld h,l ; load l into h
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP ;draw l:status byte
+  ELSE
+    ld a,h ; swap h and l if flipped
+    ld h,l 
+    ld l,a
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP ;draw l:status byte
+    inc de
+    ld h,l ; load l into h
+    PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP ;draw h:keepalive packet
+  ENDC
+  
+  ;Wait 16 frames to display it
+  ld b,$10
+  call Printer_Delay_b_Frames
+
+  ;Wait for a button press
+  xor a
+  ld [joypad_active],a
+  :call GetInputROM
+  ld a,[joypad_active]
+  and a
+  jr z,:-
+  ; End display result 
 
 ret
 
@@ -1022,8 +1029,7 @@ ret
 ActionTransferAll::
   di
 
-  ;TODO Use the state vector to figure out which photos are in which slot
-  ld a,30 ;Initialize picture counter -- TODO: Set it to 1+ (print/transfer range max - min)
+  ld a,30
   ld [PrintAll_ToPrint],a
   
   ld a,[PrintAll_ToPrint]
@@ -1079,26 +1085,24 @@ ActionTransferAll::
     ld a,[PrintAll_ToPrint]
     cp a,b ;cp ToPrint, (ID of next photo to print)
     jr z,.allPhotosFinished ;if all photos are finished printing, finish.
-  
-  ;If no errors and loop not finished, jump back to the beginning.
-  jr .printPhotoLoop
 
 
-  .generalError
+  ; If B button is pressed
+  call GetInputROM
+  ldh a,[joypad_state]
+  and a,JOYPAD_B_MASK ; I forget if this is active-high like joypad_active or active-low like the actual registers.
+
+  jr z, .printPhotoLoop  ;If no errors, loop not finished, and B button not pressed, jump back to the beginning.
+
+
   .allPhotosFinished
-  push af
-  push bc
-  push de
-  push hl
   call PrinterDebug_DisplayCurrentPrintingPhoto
-  pop hl
-  pop de
-  pop bc
-  pop af
 
-  ld h,d
-  ld l,e
-  call PrinterDebug_DisplayResult
+  ;Redraw Settings screen
+  ld e,UI_RAMBANK
+  ld hl,InitSettingsGfx 
+  call Trampoline_hl_e
+
   xor a
   ldh [rIF],a
 reti
