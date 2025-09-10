@@ -808,6 +808,7 @@ ret
 ; @returns de+1
 MACRO PRINTERDEBUG_DRAW_BYTE_TO_TILEMAP
   ; Load first nybble of our variable into low nybble of a. This is the high nybble if not flipped, low nybble if flipped.
+  ld a,h
   IF (!SCREEN_FLIP_H) 
     swap a
   ENDC
