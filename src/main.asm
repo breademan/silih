@@ -231,9 +231,11 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
   ld a,[wLCDC] ;+4c3b
   ldh [rLCDC],a ;+3c2b
 
-  call DrawTopbar_DMAMethod  ;TODO inline this
   call DrawSidebar ;TODO inline this
   call ModifyPalette
+
+  call DrawTopbar_DMAMethod  ;TODO inline this
+  call GDMA_Photo_Transfer
 
   ;Anything under here can run even if we're not in VBlank, but keep in mind interrupts won't be enabled
   ;set VBlank_finished_flag
@@ -676,40 +678,15 @@ DrawTopbar_DMAMethod:
   ;Save current VRAM bank: 17 cycles across start and end
   ldh a,[rVBK] ;+3c2b
   push af ;+4c1b
-  ;Switch to VRAM bank 0 to change tile IDs
+  ;Switch to VRAM bank 0 -- tilemap, not attribute  map
   xor a ;+1c1b
   ldh [rVBK],a ;+3c2b
 
   ldh a,[rHDMA5] ;+3c2b
   bit 7, a ;+2c2b
-  jr nz,.none_active ;+3/2c2b
-  .pauseandsaveHDMAtransfer:
-  ;"terminate an active HBlank transfer by writing zero to Bit 7 of FF55" from Pandocs. Does this mean I should write a full 0 byte, or should I save the value of HDMA5 and reset bit 7 only?
-  res 7,a ;+2c2b ;reset bit 7 only
-  ldh [rHDMA5], a ;+3c2b ;write 0 to HDMA5:7 to stop the transfer
-  ; update variables for the transfer  
-    ;due to checking and stopping the transfer, reg a already has the amount remaining for this transfer, minus one
-    inc a ;+1c1b
-    ld b,a ;+1c1b
-    ld a,[hdma_current_transfer_length] ;+4c3b
-    sub a,b ;+1c1b
-    ld b, a ;+1c1b ;b =marginal amount transferred = hdma_current_transfer_length - (local_remaining+1)
+  jr nz,.none_active ;+3/2c2b ; If there are no active transfers, skip stopping HDMA transfers, transfer the tiles 
 
-    ;hdma_total_remaining -= marginal_amount_transferred
-    ld a,[hdma_total_remaining] ;+4c3b
-    sub a,b ;+1c1b
-    ld [hdma_total_remaining],a ;+4c3b
-
-    ;new hdma_current_transfer_length = MIN($80,hdma_total_remaining ). Note that HDMA_current_transfer_length is the ACTUAL length,not length-1, and must be converted.
-    cp a, $80 ;+2c2b ;carry if $80 is bigger, so we'll use total_remaining.
-    jr c, :+ ;+3/2c 2b
-      ld a,$80 ;+2c2b   ;no carry case, $80 < hdma_total_remaining, so hdma_current_transfer_length=$80
-   :ld [hdma_current_transfer_length], a ;+4c3b  ;carry case, hdma_current_transfer_length=total_remaining=a
-
-    ;hdma_total_transferred+=marginal_amount_transferred
-    ld a,[hdma_total_transferred] ;+4c3b
-    add a,b ;+1c1b
-    ld [hdma_total_transferred],a ;+4c3b
+  call PauseAndSaveHDMATransfer
 
   call StartGDMATransfer_Line1
   call StartGDMATransfer_Line2
@@ -789,19 +766,19 @@ RestartHDMATransfer:
 	ld HL, CAPTURE_TILEDATA_START ;+3c3b ;new dest address 
 	add HL, DE ;+2c1b
 	ld a,H ;+1c1b
-  ld [wHDMA3],a
+  ld [wHDMA3],a ;4c3b
 	ldh [rHDMA3],a ;+3c2b
 	ld a,L ;+1c1b
-  ld [wHDMA4],a
+  ld [wHDMA4],a ;4c3b
 	ldh[rHDMA4],a ;+3c2b
 	
 	ld HL, CAPTURE_DATA_START_SRAM ;+3c3b ;new src address
 	add HL, DE ;+2c1b
 	ld a,H ;+1c1b
-  ld [wHDMA1],a
+  ld [wHDMA1],a ;4c3b
 	ldh [rHDMA1],a ;+3c2b
 	ld a,L ;+1c1b
-  ld [wHDMA2],a
+  ld [wHDMA2],a ;4c3b
 	ldh[rHDMA2],a ;+3c2b
 
   ;wait for afterHblank (OAM search) or 1 -- if only one of the two LSBs is set, break. If it's %00 or %11, loop.
@@ -2083,6 +2060,168 @@ WaitForVBlankStart::
   and a,%00000011
   cp a,$01
   jr nz,:-
+ret
+
+;Stops the HDMA tiledata transfer of image data from SRAM to VRAM
+;Call only if a transfer is already running (if HDMA5:7 is 0)
+;@param a: value of rHDMA5
+PauseAndSaveHDMATransfer:
+  ;"terminate an active HBlank transfer by writing zero to Bit 7 of FF55" from Pandocs. Does this mean I should write a full 0 byte, or should I save the value of HDMA5 and reset bit 7 only?
+  res 7,a ;+2c2b ;reset bit 7 only.
+  ldh [rHDMA5], a ;+3c2b ;write 0 to HDMA5:7 to stop the transfer
+  ; update variables for the transfer  
+    ;due to checking and stopping the transfer, reg a already has the amount remaining for this transfer, minus one
+    inc a ;+1c1b
+    ld b,a ;+1c1b
+    ld a,[hdma_current_transfer_length] ;+4c3b
+    sub a,b ;+1c1b
+    ld b, a ;+1c1b ;b =marginal amount transferred = hdma_current_transfer_length - (local_remaining+1)
+
+    ;hdma_total_remaining -= marginal_amount_transferred
+    ld a,[hdma_total_remaining] ;+4c3b
+    sub a,b ;+1c1b
+    ld [hdma_total_remaining],a ;+4c3b
+
+    ;new hdma_current_transfer_length = MIN($80,hdma_total_remaining ). Note that HDMA_current_transfer_length is the ACTUAL length,not length-1, and must be converted.
+    cp a, $80 ;+2c2b ;carry if $80 is bigger, so we'll use total_remaining.
+    jr c, :+ ;+3/2c 2b
+      ld a,$80 ;+2c2b   ;no carry case, $80 < hdma_total_remaining, so hdma_current_transfer_length=$80
+   :ld [hdma_current_transfer_length], a ;+4c3b  ;carry case, hdma_current_transfer_length=total_remaining=a
+
+    ;hdma_total_transferred+=marginal_amount_transferred
+    ld a,[hdma_total_transferred] ;+4c3b
+    add a,b ;+1c1b
+    ld [hdma_total_transferred],a ;+4c3b
+ret
+
+/**
+* Transfers tiledata from the cart to VRAM, if there's time in VBlank to do so.
+* Stops and restarts the current HDMA transfer if there is one, .
+* @clobber a, b, de, hl
+*/
+GDMA_Photo_Transfer:
+  ;Save current VRAM bank:
+  ldh a,[rVBK] ;+3c2b
+  push af ;+4c1b
+  ;Switch to VRAM bank 0 -- tilemap, not attribute  map
+  xor a ;+1c1b
+  ldh [rVBK],a ;+3c2b
+
+  ldh a,[rHDMA5] ;+3c2b
+  bit 7, a ;+2c2b
+  jr nz,.none_active ;+3/2c2b ; If there are no active transfers, skip stopping HDMA transfers and transferring the tiles 
+
+  ;Determine what scanline we're on -- VBlank's last line is LY=153($99)
+  ldh a,[rLY]
+  ld b,a ;store rLY in b
+  ;Make sure LY >=144
+  ld a,144
+  cp a,b ; a - b ; should carry if we're in Vblank
+  jr nc,.not_in_vblank
+
+  DEF GDMA_OVERHEAD EQU 3 ; How many scanlines it takes to do all the overhead.
+                          ; Everything until the VRAM bankswitch at the end of this function.
+                          ; Each scanline is 114 normal-speed CPU cycles.
+  ld a,(153-GDMA_OVERHEAD)
+  sub a,b ; output is how many lines you have left in VBlank
+  jr c,.no_time ;if we don't have even a scanline left after overhead, just finish.
+  
+  ld b,a ; b is number of scanlines we have left after overhead
+  ;We can transfer 14*b blocks, which is 16*b - 2*b
+  swap a
+  and a,$F0 ; a = remaining scanlines*16
+  sla b ; b = remaining scanlines * 2
+  sub a,b ; a=16*b, b=2*b ; a is now 14*number of remaining scanlines
+  push af ; Store number of blocks we can transfer in remaining VBlank time.
+
+  ldh a,[rHDMA5]
+  call PauseAndSaveHDMATransfer
+
+  pop af ; Number of blocks it's possible to GDMA transfer
+  call StartGDMATransfer_Capture
+
+  ; If hdma_total_remaining after GDMA transfer is zero, don't restart the HDMA transfer
+  ld a,[hdma_total_remaining]
+  and a
+  jr z,:+
+    ;If total remaining bytes to transfer is zero, skip restarting HDMA
+  call RestartHDMATransfer
+  :
+  .not_in_vblank
+  .no_time
+  .none_active:
+  .cleanup:  ;Restore current VRAM bank after setting it to 0 to change the tilemap.
+  pop af ;+3c1b
+  ldh [rVBK],a ;+3c2b
+ret 
+
+
+/**
+* Starts a GDMA transfer 
+* @param a: number of $10-sized blocks to transfer
+*/
+StartGDMATransfer_Capture:
+  push af ;4c1b ; Push the number of blocks it's possible to transfer
+  ; Calculate addend as to_dma16addr(hdma_total_transferred) and put it in de
+	ld a,[hdma_total_transferred] ;+4c3b
+	ld e, a ;+1c1b
+	swap e ;+2c2b
+	and a,$F0 ;+2c2b
+	swap a ;+2c2b
+	ld d,a ;+1c1b ;de is now our addend
+  ; Load new source and dest addresses
+	ld HL, CAPTURE_TILEDATA_START ;+3c3b ;new dest address 
+	add HL, DE ;+2c1b
+	ld a,H ;+1c1b
+	ldh [rHDMA3],a ;+3c2b
+	ld a,L ;+1c1b
+	ldh[rHDMA4],a ;+3c2b
+	
+	ld HL, CAPTURE_DATA_START_SRAM ;+3c3b ;new src address
+	add HL, DE ;+2c1b
+	ld a,H ;+1c1b
+	ldh [rHDMA1],a ;+3c2b
+	ld a,L ;+1c1b
+	ldh[rHDMA2],a ;+3c2b
+
+  ; Load new length into HDMA5 and start: Our transfer length variable, hdma_transfer_length
+  ; Whichever is shorter (Since we only have 10 scanlines in VBlank, our max length is 126 ($7E) or lower)
+  ; For an active transfer we already set hdma_transfer_length to Min($80,hdma_total_remaining)
+  ; when HDMA transferring the topbar.
+  pop hl ;3c1b ; h = function argument, number of blocks it's possible to transfer in Vblank.
+
+  ; Set transfer length to min (hdma_current_transfer length, )
+  ; Because for an active transfer we've already set hdma_current_transfer_length to $80 or below earlier in VBlank,
+  ; We don't need to do min (hdma_total_remaining,$80,argument)
+	ld a, [hdma_current_transfer_length] ;+4c3b
+  cp a,h ;1c1b ; carry if our length is greater than the length of remaining data
+          ; If carry (argument length > hdma_current_transfer_length), just use hdma_current_transfer_length a
+          ; If no carry (argument length is <= hdma_current_transfer_length), use argument length h
+  jr c,:+ ;3/2c2b
+    ld a,h ;1c1b ; set transfer length of GDMA to arg length
+  :
+  ld b,a ;1c1b ; b = length of this GDMA transfer, in blocks
+  ; Increase hdma_total_transferred by the length of this GDMA transfer after it's done. 
+  ld a,[hdma_total_transferred] ;4c3b
+  add a,b ;1c1b
+  ld [hdma_total_transferred],a ;4c3b
+  ; Decrease hdma_total_remaining by the length of this GDMA transfer after it's done.
+  ld a,[hdma_total_remaining] ;4c3b
+  sub a,b ;1c1b
+  ld [hdma_total_remaining],a ;4c3b
+  ; Set hdma_current_transfer_length = the length of the transfer AFTER this GDMA transfer completes (min of $80, hdma_total_remaining)
+  ; This will be used by the HDMA restart function (or the whole function will be skipped if zero)
+  cp a,$80 ;2c2b ; compare hdma_total_remaining after transfer with $80
+  ; carry if hdma_total_remaining(a) < $80 ; if no carry (hdma_total_remaining>=$80), use $80
+  jr c,:+ ;3/2c2b
+    ld a,$80 ;2c2b ;If hdma_total_remaining is 
+  :
+  ld [hdma_current_transfer_length],a ;4c3b ; hdma_current_transfer length = min(hdma_total_remaining after GDMA, $80)
+
+  ld a,b ;1c1b ; load GDMA transfer length
+	dec a ;+1c1b ;HDMA5 takes length-1 blocks
+	res 7,a ;+2c2b ;Bit 7 clear – GDMA
+	ldh [rHDMA5],a ;+3c2b
 ret
 
 ;---------------------------------Save Data Functions-----------------------------------------------------

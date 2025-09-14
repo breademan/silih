@@ -1429,7 +1429,7 @@ ret
 
 Setting_AEB_Interval_SetDefault:
   ld a,[Setting_AEB_Interval]
-  ld a,$03
+  ld a,$01
   ld [Setting_AEB_Interval],a
   call Setting_AEB_Interval_Sanitize
 ret
