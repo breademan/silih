@@ -32,7 +32,8 @@
   X "PALETTE NUMBER", Setting_Palette_Scheme,   $01,  $01,  $02, Setting_Palette_Scheme_Dec, Setting_Palette_Scheme_Inc, Setting_Palette_Scheme_SetDefault, $01
   X "PRINT ALL TEST", NULL,                          $00,  $00,  $01, NullFunction, NullFunction, Init_PrintAll, $00, NullFunction, 0
   X "TRANSFER ALL", NULL,                       $00,  $00, $01, NullFunction, NullFunction, Init_TransferAll, $00, NullFunction, 0
-  X "SAVE SETTINGS",NULL,                       $00,  $00,  $01, NullFunction, NullFunction, Init_SaveSettings, $00, NullFunction, 0
-  X "SAVE CAM OPTIONS",NULL,                    $00,  $00,  $01, NullFunction, NullFunction, Init_SaveCamOpts, $00, NullFunction, 0
+  ;X "SAVE SETTINGS",NULL,                       $00,  $00,  $01, NullFunction, NullFunction, Init_SaveSettings, $00, NullFunction, 0
+  ;X "SAVE CAM OPTIONS",NULL,                    $00,  $00,  $01, NullFunction, NullFunction, Init_SaveCamOpts, $00, NullFunction, 0
+  X "WEBCAM MODE",Setting_Webcam_Mode,          $01,  $00,  $01,  Setting_Webcam_Mode_Toggle, Setting_Webcam_Mode_Toggle, Setting_Webcam_Mode_Toggle, $00, DrawSetting_Webcam_Mode
   X "DELETE ALL PHOTOS",NULL,                   $00,  $00, $01, NullFunction, NullFunction, Init_DeleteAll, $00
 PURGE X

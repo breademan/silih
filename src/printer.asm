@@ -1126,4 +1126,36 @@ PatchCode_PrintSpeed::
 
 ret
 
+/**
+* Sends a group of packets to the printer to transfer from the viewfinder.
+* Prior to calling this, ensure no captures are running and switch to the appropriate SRAM bank for the photo.
+* @arg h: HIGH address of image data, either A0 or B0
+* @return d: 0 in d if keepalive packet is $80/81
+* @return e: status byte of the last packet
+*/
+ViewfinderTransaction_TransferPhoto::
+  di
+  ;Set SRAM bank to 0 (last seen)
+  xor a
+  ld [rRAMB],a
+  ;Point h to start of photo
+  ld hl, $A000
+  
+
+
+  ;Clear buffer with an Init packet before sending packet.
+  push hl ; Push and pop the pointer to our image data. ;4c
+  call SendPacket_Init
+  pop hl ;3c
+
+  ;Only send one giant data packet of 3584 bytes (16x14 tiles)
+  ;(According to the Photo! readme)
+  call SendPacket_TransferData
+
+  ;clear interrupts
+  xor a
+  ldh [rIF],a
+reti ;reenable interrupts and return
+
+
 ENDL
