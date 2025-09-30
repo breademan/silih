@@ -997,7 +997,7 @@ SendPacket_TransferData:
   ld b,$0E ;send high byte of length
   call SendByte_b
 
-  REPT $10
+  REPT 14
   call SendPacketFragment_OneLine_Transfer
   ENDR
   ;Checksum is zero
@@ -1024,7 +1024,7 @@ SendPacketFragment_OneLine_Transfer:
   ;Send first line of 16 image tiles -- $100 bytes
   ld l,$00 ;2c2b
   ld c,$FF ;2c2b
-  call SendMulti_hl_c
+  call SendMulti_hl_c_LowOverhead
 ret
 
 ActionTransferAll::
@@ -1123,6 +1123,7 @@ PatchCode_PrintSpeed::
   ld a,b ;a is now holding our value to write to SC to start printing.
   ld [PatchCode_PrintSpeed_Location1+1],a ;change the n8 in a ld a,n8
   ld [PatchCode_PrintSpeed_Location2+1],a
+  ld [PatchCode_PrintSpeed_Location3+1],a
 
 ret
 
@@ -1156,6 +1157,42 @@ ViewfinderTransaction_TransferPhoto::
   xor a
   ldh [rIF],a
 reti ;reenable interrupts and return
+
+/**
+* Sends a byte over serial with low overhead by using a reg a to hold the byte value and swap register d for the rSC value.
+* @param a: byte to send over serial
+* @param d: value to put into rSC to start the send (generally SCF_START | SCF_SOURCE [| SCF_SPEED])
+* @clobber a
+* Waits for transfer to finish after the byte is sent.
+*/
+MACRO SENDBYTE_A_D_LOWOVERHEAD
+  ; Assumes a serial transfer isn't running.
+  ldh [rSB],a ;3c
+  ld a, d ; Load the rSC send value ;1c
+  ldh [rSC],a ;3c
+  ;Wait for transmission to end
+  ;TODO: To further increase speed, fetch next byte into a swap register before the waitloop. Register e should be free.
+  ;       If we do this, we also need to put that value into the register once before we start the loop
+  :ldh a,[rSC] ;3c
+  bit 7,a ;3c
+  jr nz,:- ;2c untaken, 3c taken
+ENDM
+
+/**
+* @param hl: data to send over serial
+* @param c: length of data-1 (can transmit up to $100 bytes)
+* @clobber a,bc,d,hl
+*/
+SendMulti_hl_c_LowOverhead:
+  PatchCode_PrintSpeed_Location3:
+  ld d,SCF_START | SCF_SOURCE | SCF_SPEED ; 2c
+  inc c ;1c
+  .loop
+  ld a,[hli] ;2c
+    SENDBYTE_A_D_LOWOVERHEAD
+    dec c ;1c
+  jr nz,.loop ;3/2 cycles
+ret
 
 
 ENDL
