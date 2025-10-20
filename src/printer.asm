@@ -1020,6 +1020,12 @@ ret
 *@return hl: original address plus $100 (one line of Game Boy Camera tiles)
 */
 SendPacketFragment_OneLine_Transfer:
+; Call a different function depending on the set print speed.
+; Send256_de_LowOverhead doesn't work for normal-speed transfers for some reason.
+  ld a,[Setting_Print_Speed]
+  and a
+  jr z,.slowPrint
+
   ;Send first line of 16 image tiles -- $100 bytes
   ld d,h ; Takes address h(l) for compatability but uses de internally
   ld e,$00 
@@ -1028,6 +1034,11 @@ SendPacketFragment_OneLine_Transfer:
   inc d
   ld h,d ;return with hl+100
   ld l,e
+ret
+  .slowPrint
+  ld l,$00 ;2c2b
+  ld c,$FF ;2c2b
+  call SendMulti_hl_c_LowOverhead
 ret
 
 ActionTransferAll::
