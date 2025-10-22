@@ -11,6 +11,8 @@ Currently, it is missing several important features.
 - Remote control over the link cable
 - Burst shot and AEB (Automatic Exposure Bracketing) modes
 - Quickly switch between the original ROM and Silihcam with the press of two buttons
+- Additional dithering patterns on top of the standard Bayer dithering
+- Compatability with the [Pico Game Boy Printer](https://github.com/untoxa/pico-gb-printer) for transferring photos and [Pico Game Boy Web Camera](https://github.com/untoxa/pico-gb-webcamera/) for streaming/recording video
 
 ## Planned Features
 - Printing support
@@ -29,7 +31,7 @@ If for some reason you want to run it in an emulator, only some emulators suppor
 ## Controls
 - __A__: Take a photo. In single-shot mode, pressing A again will save the picture, and pressing B will discard it.
 - __Select+Up__: Switch to stock software stored on the ROM, allowing you to access the gallery, take a photo with the stock software's autoexposure, or print (printing is currently untested, but should work). You can return to Silihcam by holding SELECT+DOWN. 
-- __Start__: Settings menu.
+- __Start__: Open the settings menu.
 
 ## Camera Option values
 The camera registers are best described in [the readme for Photo!](https://github.com/untoxa/gb-photo?tab=readme-ov-file#effect-of-the-main-adressable-parameters), in [AntonioND's Game Boy Camera Technical Information](https://github.com/AntonioND/gbcam-rev-engineer/blob/master/doc/gb_camera_doc_v1_1_1.pdf) document, and in the sensor datasheet.
@@ -41,19 +43,26 @@ The camera registers are best described in [the readme for Photo!](https://githu
 - __V__: Output node bias voltage (Vref), in steps of 0.5V. The original software always sets this to 3 (1.5V). In practice, increasing this value leads to all pixels looking 'brighter' to the MAC-GBD chip. Changing this may set the voltage the sensor outputs outside of the range of the MAC-GBD's analog-to-digital converter.
 - __Contrast__: Determines what values are used in the dither table and how close together the values are to each other.
 - __Dither Table__: The ROM has 3 tables of base values used for dithering: 0 for low light conditions, 1 for high light conditions, and 2 unused.
+- __Dither Pattern__: Determines how the values generated from Contrast and Dither Table options are arranged into a 4px-by-4px matrix used for quantizing the analog sensor readings into 2-bit greyscale. In order, the patterns are: optimized Bayer matrix, no-dithering, checkerboard, vertical lines, horizontal lines, and two different variations on diagonal lines.
 
-## Settings
+## Settings Menu
 Most settings are currently unimplemented.
 - __Serial Remote__: If checked, SILIH will listen for remote control button presses over the link port.
-- __On Take__: Determines what will happen when a photo is taken. Only "save" is currently implemented.
 - __Mode__: Single shot, burst shot, or AEB (Automatic Exposure Bracketing). AEB mode will take an equal number of overexposed and underexposed shots for higher dynamic range.
 - __Shot Count__: Number of photos to take in Burst or AEB mode. For AEB mode, this is restricted to odd numbers.
 - __AEB Shift__: In AEB mode, affects the amount added or subtracted to get the exposure time (C) of the next shot. A higher AEB shift means a smaller AEB step.  
 1 = ±50%, 2 = ±25%, 3 = ±12.5%, 4 = ±6.25%, 5 = ±3.125%.
+- __Fast Print__: When transferring photos, enables CGB-only fast serial transfers. The RP2040-based devices are known to support this speed, but real Pocket Printers won't. Other printer emulators are unlikely to work at this speed.
+- __Double Speed__: Enables the CGB-only double-speed CPU mode. Improves framerate and serial transfer speed, but consumes more power. Exposure time must be doubled to compensate. The Pocket Camera doesn't officially support this speed, and photos seem to be 'noisier' than an equivalent photo taken at single-speed. May be useful in very bright scenes to give finer control of exposure time.
+- __Palette Number__: Determines the palette used to preview photos.
+- __Print All Test__: Prints all active photos without fast printing. Currently broken, but may print a few pictures before breaking.
+- __Transfer All__: Transfers all active photos using the Transfer protocol supported by the RP2040-based projects.
+- __Webcam Mode__: Transfers each seen frame on the viewfinder over the link cable via the Transfer protocol. Using with Fast Print is highly recommended.
+- __Delete All Photos__: Frees all photo slots. The image data is still available on the cart until overwritten.
 - All other settings are non-functional.
 
 ## Remote Controller
-Silihcam can be controlled remotely by another Game Boy over the link cable port. This is useful for taking stabilized shots.\
+Silihcam can be controlled remotely by another Game Boy over the link cable port. This is useful for taking stabilized shots.  
 When the Silihcam cart is run on a device that is not CGB-compatible, pressing a button will instead launch the remote controller. It can also be launched on a CGB-compatible device by pressing a button in the launcher without cartswapping.
 
 ## Building on Linux / macOS

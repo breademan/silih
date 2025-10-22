@@ -1676,6 +1676,14 @@ Setting_Double_Speed_Toggle:
 
 ret
 
+Setting_Webcam_Mode_Toggle:
+  ld a,[Setting_Webcam_Mode]
+  ; Disable (if webcam enabled) or reenable (if webcam disabled) remote control
+  ld [SerialEnable],a
+  xor a,$01
+  ld [Setting_Webcam_Mode],a
+ret
+
 Init_PrintAll:
   ld hl, ActionDetectPrinter ; addr of the callee
   ld e, PRINTER_RAMBANK ;bank which the callee is in
@@ -1750,6 +1758,7 @@ DrawSettings:
   call DrawSetting_Print_Speed
   call DrawSetting_Double_Speed
   call DrawSetting_Palette_Scheme
+  call DrawSetting_Webcam_Mode
 ret
 
 
@@ -1866,6 +1875,14 @@ DrawSetting_Palette_Scheme:
   and a, $0F
   add a,UI_ICONS_BASE_ID
   SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,8,hl
+  ld b,a
+  call DrawTileInHBlank
+ret
+
+DrawSetting_Webcam_Mode:
+  SETTINGS_PUT_TILEMAP_ADDR_IN_R16 19,11,HL
+  ld a,[Setting_Webcam_Mode]
+  add a,CHECKBOX_TILE_ID_DIS
   ld b,a
   call DrawTileInHBlank
 ret

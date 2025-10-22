@@ -984,9 +984,7 @@ ret
 */
 SendPacket_TransferData:
 
-
   call SendMagicBytes
-  ld de,$00 ;initialize checksum
   ld b,PRINTER_CMD_TRANSFER
   call SendByte_b ;Send command
   ld b,PRINTER_COMPRESSION_OFF
@@ -997,7 +995,7 @@ SendPacket_TransferData:
   ld b,$0E ;send high byte of length
   call SendByte_b
 
-  REPT $10
+  REPT 14
   call SendPacketFragment_OneLine_Transfer
   ENDR
   ;Checksum is zero
@@ -1018,13 +1016,29 @@ ret
 /**
 * Sends one line of tiles in the Transfer Data packet format (16 tiles)
 *@param h: high byte of the line of 16 tiles to send
+*@clobber a,bc,de
 *@return hl: original address plus $100 (one line of Game Boy Camera tiles)
 */
 SendPacketFragment_OneLine_Transfer:
+; Call a different function depending on the set print speed.
+; Send256_de_LowOverhead doesn't work for normal-speed transfers for some reason.
+  ld a,[Setting_Print_Speed]
+  and a
+  jr z,.slowPrint
+
   ;Send first line of 16 image tiles -- $100 bytes
+  ld d,h ; Takes address h(l) for compatability but uses de internally
+  ld e,$00 
+  call Send256_de_LowOverhead
+  ;This should end with de looped back to its original value
+  inc d
+  ld h,d ;return with hl+100
+  ld l,e
+ret
+  .slowPrint
   ld l,$00 ;2c2b
   ld c,$FF ;2c2b
-  call SendMulti_hl_c
+  call SendMulti_hl_c_LowOverhead
 ret
 
 ActionTransferAll::
@@ -1123,7 +1137,119 @@ PatchCode_PrintSpeed::
   ld a,b ;a is now holding our value to write to SC to start printing.
   ld [PatchCode_PrintSpeed_Location1+1],a ;change the n8 in a ld a,n8
   ld [PatchCode_PrintSpeed_Location2+1],a
+  ld [PatchCode_PrintSpeed_Location3+1],a
+  ld [PatchCode_PrintSpeed_Location4+1],a
 
 ret
+
+/**
+* Sends a group of packets to the printer to transfer from the viewfinder.
+* Prior to calling this, ensure no captures are running and switch to the appropriate SRAM bank for the photo.
+* @arg h: HIGH address of image data, either A0 or B0
+* @return d: 0 in d if keepalive packet is $80/81
+* @return e: status byte of the last packet
+*/
+ViewfinderTransaction_TransferPhoto::
+  di
+  ;Set SRAM bank to 0 (last seen)
+  xor a
+  ld [rRAMB],a
+  ;Point h to start of photo
+  ld hl, $A000
+  
+
+
+  ;Clear buffer with an Init packet before sending packet.
+  push hl ; Push and pop the pointer to our image data. ;4c
+  call SendPacket_Init
+  pop hl ;3c
+
+  ;Only send one giant data packet of 3584 bytes (16x14 tiles)
+  ;(According to the Photo! readme)
+  call SendPacket_TransferData
+
+  ;clear interrupts
+  xor a
+  ldh [rIF],a
+reti ;reenable interrupts and return
+
+/**
+* Sends a byte over serial with low overhead by using a reg a to hold the byte value and swap register d for the rSC value.
+* @param a: byte to send over serial
+* @param d: value to put into rSC to start the send (generally SCF_START | SCF_SOURCE [| SCF_SPEED])
+* @param hl: location of next byte to read
+* Because this is used in SendMulti_hl_c, we can't use hl or c. That leaves de.
+* @return e: value to put into rSB next (may not be valid, if at end of loop)
+* @clobber a, e
+* Waits for transfer to finish after the byte is sent.
+*/
+MACRO SENDBYTE_A_D_LOWOVERHEAD
+  ; Assumes a serial transfer isn't running.
+  ldh [rSB],a ;3c
+  ld a, d ; Load the rSC send value ;1c
+  ldh [rSC],a ;3c
+  ;Wait for transmission to end
+  ;TODO: To further increase speed, fetch next byte into a swap register before the waitloop. Register e should be free.
+  ;       If we do this, we also need to put that value into the register once before we start the loop
+  ; This should work because in normal-speed mode, transferring a bit takes 4 M-cycles, so we wait a total of 32 M-cycles.
+  :ldh a,[rSC] ;3c
+  bit 7,a ;2c
+  jr nz,:- ;2c untaken, 3c taken
+ENDM
+
+/**
+* @param hl: data to send over serial
+* @param c: length of data-1 (can transmit up to $100 bytes)
+* @clobber a,bc,d,hl
+*/
+SendMulti_hl_c_LowOverhead:
+  PatchCode_PrintSpeed_Location3:
+  ld d,SCF_START | SCF_SOURCE | SCF_SPEED ; 2c
+  inc c ;1c
+  .loop
+  ld a,[hli] ;2c
+    SENDBYTE_A_D_LOWOVERHEAD
+    dec c ;1c
+  jr nz,.loop ;3/2 cycles
+ret
+
+/**
+* @param de: data to send over serial
+* @clobber a,bc, e,hl
+* @return e: set to zero
+* @return d: unchanged from start
+*/
+Send256_de_LowOverhead:
+;de is the source address
+;a holds the value read from de
+;b is the constant value to put into SC
+;c is the low address of SB ($02)
+;hl is SC
+
+  PatchCode_PrintSpeed_Location4:
+  ld b,SCF_START | SCF_SOURCE | SCF_SPEED ;b = Constant value used for SC 2c
+  ld c,LOW(rSB)
+  ld hl,rSC 
+  
+  ld a,[de] ;de = source address
+  ld [c],a ; Load value into SB
+  ld [hl],b  ; Start transfer using SC
+
+  .sendloop
+
+  ;Now we can freely use cycles because we're waiting for a transfer to complete anyway.
+  inc e ;1c ; this only goes up to $00 -- if next address's high bit, finish up. This does mean we can only transfer until we reach this boundary.
+  ld a,[de] ; get next byte
+  jr z,.sendend ; if the next address's high bit is set, finish up
+  :bit 7,[hl] ;3c ; Wait until transfer is finished
+  jr nz,:- ;3/2c
+  ;Serial transfer is complete, so send next byte
+  ld [c],a ;2c ; Load value into SB and set hl to point to SC
+  ld [hl],b ;2c ; Start transfer by loading b into SC
+  jr .sendloop
+
+  .sendend
+ret
+
 
 ENDL

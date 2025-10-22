@@ -89,6 +89,7 @@ ENDU
   Setting_Print_Speed:: db ; Determines whether SC bit 1 (clock speed) is set when printing or transferring.
   Setting_Double_Speed:: db ; Holds whether the GBC is in single- or double-speed mode. 
   Setting_Palette_Scheme:: db ; Holds the user-selected palette scheme (a set of BG and OBJ palettes)
+  Setting_Webcam_Mode:: db ; If enabled, the viewfinder will transfer the last seen capture over the link cable port.
   ;2 bytes
   BurstShotRemainingCaptures: db
   BurstShotCurrentCapture: db
@@ -106,8 +107,8 @@ ENDU
 
   NullVar: db     ;Placeholder variable that can be changed with no consequences. Currently used for ui_elements unused elements in the middle.
 
-  ;Cumulative $FC bytes
-  ;$02 bytes remaining
+  ;Cumulative $FE bytes
+  ;$01 byte remaining
   .endVariables
 assert .endVariables < OAM_Work_Area, "Variables are outside of $CD00-$CDFF - variables area, and stomping on OAM area"
 
@@ -769,6 +770,14 @@ DMAHandler:
       jp ViewfinderChecks
     jp ViewfinderChecks
   .notInBurstAEB
+      ld a,[Setting_Webcam_Mode]
+      and a
+      jr z,:+
+        ;Switch to WRAM bank for Printer transfer
+        ld a,PRINTER_RAMBANK
+        ldh [rSVBK],a
+        call ViewfinderTransaction_TransferPhoto
+        :
       ld a, VF_STATE_TRANSITION
       ldh [viewfinder_state], a
     jp ViewfinderChecks
