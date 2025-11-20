@@ -124,9 +124,10 @@ DEF VF_STATE_IDLE EQU 0 ;DMA finished or init state: start a capture from here
 DEF VF_STATE_CAPTURING EQU 1 ;Waiting on capture
 DEF VF_STATE_DMA EQU 2 ;During a DMA
 DEF VF_STATE_PAUSED EQU 3 ;Another screen is going, so don't do any of the viewfinder action/checks
-DEF VF_STATE_TRANSITION EQU 4
+DEF VF_STATE_ACTIONTRANSITION EQU 4 ; An action (such as capturing for the viewfinder, taking a single picture, or taking a burst shot) is complete.
+DEF VF_STATE_WEBCAM_TRANSFER EQU 5 ; Transferring image data over the serial cable using the transfer protocol.
 
-DEF VF_ACTION_VIEWFINDER EQU 0
+DEF VF_ACTION_VIEWFINDER EQU 0 ; Action to capture 
 DEF VF_ACTION_TAKE_SINGLE EQU 1
 DEF VF_ACTION_BURST EQU 2
 

@@ -444,7 +444,7 @@ ret
 *@return e: status byte of printer
 ;@clobber a,bc,hl
 */
-SendPacket_Init:
+SendPacket_Init::
   xor a ;1c
   ld [Packet_Checksum_RetryCount],a ;4c
 
@@ -978,26 +978,25 @@ SendTransaction_TransferPhoto:
 ret
 
 
-/*
-*@param h: HIGH address of image data, either A0 or B0
-*@return none: we don't do error checking.
-*/
-SendPacket_TransferData:
-
+; Send the preamble of the single data packet for a Transfer packet.
+; @clobber a,b
+; Implementer's note: MUST NOT clobber hl so SendPacket_TransferData can use this.
+SendPacketFragment_TransferPreamble::
   call SendMagicBytes
   ld b,PRINTER_CMD_TRANSFER
   call SendByte_b ;Send command
   ld b,PRINTER_COMPRESSION_OFF
   call SendByte_b
-  ;Length of packet is 128x112x2bpp/8bitsperbyte = decimal 3584 or $E000
+  ;Length of packet is 128x112x2bpp/8bitsperbyte = decimal 3584 or $0E00
   ld b,$00 ;send low byte of length
   call SendByte_b
   ld b,$0E ;send high byte of length
   call SendByte_b
+ret
 
-  REPT 14
-  call SendPacketFragment_OneLine_Transfer
-  ENDR
+
+SendPacketFragment_TransferPostamble::
+  ;Send this if last line is sent
   ;Checksum is zero
   ld b,00
   call SendByte_b
@@ -1006,11 +1005,24 @@ SendPacket_TransferData:
   ;Send keepalive byte
   ld b,$00
   call SendByte_b
-  ldh a,[rSB]
   ;Request printer status
   ld b,$00
   call SendByte_b
-  ldh a,[rSB]
+ret
+
+
+/*
+*@param h: HIGH address of image data, either A0 or B0
+*@return none: we don't do error checking.
+*/
+SendPacket_TransferData:
+  call SendPacketFragment_TransferPreamble
+
+  REPT 14
+  call SendPacketFragment_OneLine_Transfer
+  ENDR
+
+  call SendPacketFragment_TransferPostamble
 ret
 
 /**
@@ -1019,7 +1031,7 @@ ret
 *@clobber a,bc,de
 *@return hl: original address plus $100 (one line of Game Boy Camera tiles)
 */
-SendPacketFragment_OneLine_Transfer:
+SendPacketFragment_OneLine_Transfer::
 ; Call a different function depending on the set print speed.
 ; Send256_de_LowOverhead doesn't work for normal-speed transfers for some reason.
   ld a,[Setting_Print_Speed]
@@ -1143,35 +1155,54 @@ PatchCode_PrintSpeed::
 ret
 
 /**
-* Sends a group of packets to the printer to transfer from the viewfinder.
-* Prior to calling this, ensure no captures are running and switch to the appropriate SRAM bank for the photo.
-* @arg h: HIGH address of image data, either A0 or B0
-* @return d: 0 in d if keepalive packet is $80/81
-* @return e: status byte of the last packet
+* Sends a group of packets to the printer to transfer from the viewfinder
+* @arg WebcamTransfer_NextAddress: Holds the next address to send over serial. Should be a value between $A000- and $AD00, in steps of $0100. 
+* @return a: 0 if the final tileline wasn't sent. 1 if the line that it just sent was the final line (entered with address $AD00).
+            $Fx if WebcamTransfer_NextAddress isn't in the range of valid values:
+            $FF if source L is nonzero (source address not aligned on 256 bytes)
+            $FE if source H >$AD
+            $FD if source_H <$A0
 */
-ViewfinderTransaction_TransferPhoto::
-  di
+ViewfinderTransaction_TransferLine::
   ;Set SRAM bank to 0 (last seen)
   xor a
   ld [rRAMB],a
-  ;Point h to start of photo
-  ld hl, $A000
+  ;Point hl to next location to send from.
+  ld a, [WebcamTransfer_NextAddress_H]
+  ld h,a
+  ld a, [WebcamTransfer_NextAddress_L]
+  ld l,a
+
+  ; Error/range checking
+  ; If NextAddress_L is nonzero, something is wrong, return $FF
+  and a
+  ld a,$FF
+  ret nz
+  ; If NextAddress_H > $AD, return $FE
+  ld a,$AD
+  cp a,h ;a-$AD. C set if h>$AD.
+  ld a,$FE
+  ret c
+  ; If NextAddress_H <= $9F (AKA if it's less than $A0, return $FF
+  ld a,$9F 
+  cp a,h ; C set if h>$9F / not set if h<=9F
+  ld a,$FD
+  ret nc ; Return if <=9F
   
+  ; Send one line, then set WebcamTransfer_NextAddress_H to h.
+  call SendPacketFragment_OneLine_Transfer
+  
+  ;check if final line was sent. (h == $AE), and return 1 if so
+  ld a,$AE
+  cp a,h
+  ld a,$01
+  ret z ; If h==$AE, return 1: all lines sent
 
-
-  ;Clear buffer with an Init packet before sending packet.
-  push hl ; Push and pop the pointer to our image data. ;4c
-  call SendPacket_Init
-  pop hl ;3c
-
-  ;Only send one giant data packet of 3584 bytes (16x14 tiles)
-  ;(According to the Photo! readme)
-  call SendPacket_TransferData
-
-  ;clear interrupts
+  ; If we're not finished, set NextAddress_H to wherever our last PacketFragment finished.
+  ld a,h
+  ld [WebcamTransfer_NextAddress_H],a
   xor a
-  ldh [rIF],a
-reti ;reenable interrupts and return
+ret ; Return 0 in a
 
 /**
 * Sends a byte over serial with low overhead by using a reg a to hold the byte value and swap register d for the rSC value.

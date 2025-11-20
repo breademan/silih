@@ -35,6 +35,11 @@ DS 20
   CamOptEdgeMode:: db ;Meta-option that modifies NVH
 DS 20
 ;Insert more variables here,12 bytes
+;2 bytes
+WebcamTransfer_NextAddress:: ; When in webcam mode, this is the next address to send over the link cable.
+  WebcamTransfer_NextAddress_L:: db
+  WebcamTransfer_NextAddress_H:: db
+
 ENDU
 
   ;These variables are downstream of the above individual CamOpt variables. UpdateCameraOpts uses these contiguously and with CamOptDither_RAM, so they must be contiguous
@@ -150,10 +155,15 @@ ViewfinderChecks:
     ;Jump to relevant state handler
     ldh a, [viewfinder_state]
     add a,a
-    ld c, a
-    ld b, 0
-    ld hl, Viewfinder_jp_table
-    add hl, bc
+
+    ; Set hl = Viewfinder_jp_table+a. 7 bytes, 7 cycles
+    add LOW(Viewfinder_jp_table)
+    ld l, a
+    adc HIGH(Viewfinder_jp_table)
+    sub l
+    ld h, a
+
+    ; Dereference Viewfinder_jp_table and jump to address
     ld a, [hli]
     ld h, [hl]
     ld l, a
@@ -166,6 +176,7 @@ Viewfinder_jp_table:
     DW DMAHandler
     DW PauseHandler
     DW vfActionTransition
+    DW WebcamTransferHandler
 
 /**
 * Draws one of the 14 lines in the sidebar buffer to the sidebar in VRAM.
@@ -545,7 +556,7 @@ VBlank_ISR: ;We have 1140 M-cycles to work our magic here
 IdleHandler: ;Start a capture, change state to capturing
   call PrepareCameraOpts
   call StartCapture
-  ld a, VF_STATE_TRANSITION
+  ld a, VF_STATE_ACTIONTRANSITION
   ldh [viewfinder_state], a
 
   ld a,VF_ACTION_VIEWFINDER
@@ -625,8 +636,8 @@ ret
 
 CapturingHandler:
   ld a, [$A000]
-  and a, $01 ;If nonzero, capture isn't complete
-  jp nz, ViewfinderChecks ; leave if still capturing
+  rra ; sets c if bit 0 is set
+  jp c, ViewfinderChecks ; leave if A000:0 is set (capture not complete)
   ;Capturing complete:---------------------
   ;Start DMA transfer 
   ;Switch SRAM bank to first bank, which contains image data (we need to remember not to switch away from this while transferring)
@@ -685,8 +696,8 @@ DMAHandler:
 
   ;Return if transfer unfinished
   ldh a, [rHDMA5]
-  bit 7, a ;Bit 7 set? Not active (complete)
-  jp z, ViewfinderChecks ; Return if the transfer is active
+  rla ;sets c to rHDMA5:7. If set, no transfer active (so, complete)
+  jp nc, ViewfinderChecks ; Return if the transfer is active (bit 7 unset)
   
   ;if we got past the active check, 1 of 2 things has happened:
   ;1: The DMA transfer completed without VBlank resetting it, but there is still data to transfer. In this case, hdma_total_remaining > $80. 
@@ -730,7 +741,7 @@ DMAHandler:
 
     .transfer_complete
     ld a,[vfCurrentAction]
-    cp a,VF_ACTION_BURST  ;If currentAction is viewfinder, just set viewfinder_state to VF_STATE_TRANSITION and move on
+    cp a,VF_ACTION_BURST  ;If currentAction is viewfinder, just set viewfinder_state to VF_STATE_ACTIONTRANSITION and move on
     jr nz, .notInBurstAEB  ;If currentAction VF_ACTION_TAKE_SINGLE (impossible, as vfActionTransition will never cause this), do the same
     .inBurstAEB
       ;if doing a burst shot, save/print/transfer, decrement remaining shot counter, increment current shot number. 
@@ -764,23 +775,51 @@ DMAHandler:
         ld a,VF_ACTION_VIEWFINDER
         ld [vfNextAction],a
 
-        ld a, VF_STATE_TRANSITION
+        ld a, VF_STATE_ACTIONTRANSITION
         ldh [viewfinder_state],a
 
       jp ViewfinderChecks
-    jp ViewfinderChecks
+
   .notInBurstAEB
-      ld a,[Setting_Webcam_Mode]
+      ld a, VF_STATE_ACTIONTRANSITION
+      ldh [viewfinder_state], a ; Set viewfinder_state = VF_STATE_ACTIONTRANSITION.
+      ld a,[Setting_Webcam_Mode] ; If Webcam mode is enabled, initialize Webcam Transfer state set next state to Webcam Transfer instead.
       and a
       jr z,:+
+        ld a,$A0
+        ld [WebcamTransfer_NextAddress_H],a ;Initialize Webcam transfer address
+        xor a
+        ld [WebcamTransfer_NextAddress_L],a
+        ld a,VF_STATE_WEBCAM_TRANSFER ; Set viewfinder state to webcam transferring.
+        ldh [viewfinder_state],a
         ;Switch to WRAM bank for Printer transfer
         ld a,PRINTER_RAMBANK
-        ldh [rSVBK],a
-        call ViewfinderTransaction_TransferPhoto
+        ldh [rSVBK],a ; Switch to printer RAM bank
+        ; Send Init packet
+        call SendPacket_Init
+        ; Send Preamble
+        call SendPacketFragment_TransferPreamble
+
         :
-      ld a, VF_STATE_TRANSITION
-      ldh [viewfinder_state], a
     jp ViewfinderChecks
+
+WebcamTransferHandler:
+        ;Set WRAM bank to printer WRAMbank
+        ld a,PRINTER_RAMBANK
+        ldh [rSVBK],a ; Switch to printer RAM bank
+        call ViewfinderTransaction_TransferLine
+        ;Check return value in a: if 0, just return to ViewfinderChecks
+        ; If 1, send postamble and move to state transition.
+        ; Else, an error has occurred. Send a postable and state transition.
+        and a ; A == 0?
+        ;If yes, jp ViewfinderChecks
+        jp z, ViewfinderChecks
+        ; Else send postamble and transition to next VF state
+        call SendPacketFragment_TransferPostamble
+
+        ld a, VF_STATE_ACTIONTRANSITION
+        ldh [viewfinder_state], a ; Set viewfinder_state = VF_STATE_ACTIONTRANSITION.
+jp ViewfinderChecks
 
 
 PauseHandler:
